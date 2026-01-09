@@ -1,5 +1,7 @@
 package com.chempionat.bot.application.service;
 
+import org.springframework.stereotype.Component;
+
 import java.util.Comparator;
 
 /**
@@ -7,6 +9,7 @@ import java.util.Comparator;
  * Sorting priority: Points → Goal Difference → Goals For.
  * Head-to-head is noted as optional/future enhancement.
  */
+@Component
 public class StandingsComparator implements Comparator<TeamStanding> {
     
     @Override

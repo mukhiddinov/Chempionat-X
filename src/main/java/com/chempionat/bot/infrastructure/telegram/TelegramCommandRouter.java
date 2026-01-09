@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ public class TelegramCommandRouter {
     private final List<TelegramCommand> commands;
     private final Map<String, TelegramCommand> commandMap = new HashMap<>();
 
+    @PostConstruct
     public void init() {
         commands.forEach(cmd -> {
             commandMap.put(cmd.getCommandName(), cmd);
@@ -25,10 +27,6 @@ public class TelegramCommandRouter {
     }
 
     public void handleUpdate(Update update, TelegramBot bot) {
-        if (!commandMap.isEmpty() && commandMap.size() != commands.size()) {
-            init();
-        }
-
         String messageText = update.getMessage().getText();
         String command = extractCommand(messageText);
 
