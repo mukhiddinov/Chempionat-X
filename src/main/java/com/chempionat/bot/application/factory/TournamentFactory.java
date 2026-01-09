@@ -22,6 +22,7 @@ public class TournamentFactory {
                 .description(description)
                 .type(TournamentType.LEAGUE)
                 .createdBy(creator)
+                .build()
                 .build();
     }
     
@@ -33,6 +34,7 @@ public class TournamentFactory {
                 .description(description)
                 .type(TournamentType.PLAYOFF)
                 .createdBy(creator)
+                .build()
                 .build();
     }
     
@@ -44,6 +46,7 @@ public class TournamentFactory {
                 .description(description)
                 .type(type)
                 .createdBy(creator)
+                .build()
                 .build();
     }
 }
