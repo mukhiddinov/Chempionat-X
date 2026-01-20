@@ -33,7 +33,7 @@ public class TournamentBuilder {
                 .startDate(startDate)
                 .endDate(endDate)
                 .createdBy(createdBy)
-                .isActive(true)
+                .isActive(false)
                 .build();
     }
     

@@ -245,24 +245,48 @@ The project uses:
 
 ## Testing
 
-### Run all tests
+### Automated Integration Tests (New! ✨)
+
+Run complete tournament simulations with fake users - no Telegram account needed!
 
 ```bash
-./mvnw test
+# Run all simulation tests (4 test scenarios)
+./mvnw test -Dtest=TournamentSimulationTest
+
+# Run main league tournament simulation
+./mvnw test -Dtest=TournamentSimulationTest#testCompleteLeagueTournamentSimulation
 ```
 
-### Run specific test class
+**What it does:**
+- Creates fake admin + 4 players
+- Simulates full tournament lifecycle
+- Generates matches, submits results
+- Calculates and displays standings
+- Runs in ~13 seconds with H2 in-memory database
+
+See [TOURNAMENT_SIMULATION.md](./TOURNAMENT_SIMULATION.md) for quick start or [integration test README](./src/test/java/com/chempionat/bot/integration/README.md) for details.
+
+### Manual Testing with Real Bot
+
+See [TESTING_GUIDE.md](./TESTING_GUIDE.md) for comprehensive manual testing scenarios with real Telegram bot.
+
+### Unit Tests
 
 ```bash
+# Run all tests
+./mvnw test
+
+# Run specific test class
 ./mvnw test -Dtest=StandingsComparatorTest
 ```
 
 ### Test Coverage
 
-The project includes unit tests for:
-- ✅ Standings calculation logic
-- ✅ Tiebreaker rules (Points → Goal Difference → Goals For)
-- ✅ Team standing calculations
+The project includes:
+- ✅ **Integration tests**: Full tournament simulation with fake users
+- ✅ **Unit tests**: Standings calculation logic
+- ✅ **Unit tests**: Tiebreaker rules (Points → Goal Difference → Goals For)
+- ✅ **Unit tests**: Team standing calculations
 
 ### Test Configuration
 
