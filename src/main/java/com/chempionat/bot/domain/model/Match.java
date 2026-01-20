@@ -1,6 +1,7 @@
 package com.chempionat.bot.domain.model;
 
 import com.chempionat.bot.domain.enums.MatchLifecycleState;
+import com.chempionat.bot.domain.enums.MatchStage;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -46,6 +47,22 @@ public class Match {
     @Column(name = "round")
     private Integer round;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stage")
+    private MatchStage stage;
+
+    @Column(name = "home_score")
+    private Integer homeScore;
+
+    @Column(name = "away_score")
+    private Integer awayScore;
+
+    @Column(name = "is_bye")
+    private Boolean isBye;
+
+    @OneToOne(mappedBy = "match", cascade = CascadeType.ALL)
+    private MatchResult result;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -58,6 +75,9 @@ public class Match {
         updatedAt = LocalDateTime.now();
         if (state == null) {
             state = MatchLifecycleState.CREATED;
+        }
+        if (isBye == null) {
+            isBye = false;
         }
     }
 

@@ -44,6 +44,15 @@ public class Tournament {
     @JoinColumn(name = "created_by_user_id", nullable = false)
     private User createdBy;
 
+    @Column(name = "max_participants")
+    private Integer maxParticipants;
+
+    @Column(name = "number_of_rounds")
+    private Integer numberOfRounds;
+
+    @Column(name = "auto_start")
+    private Boolean autoStart;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -55,7 +64,13 @@ public class Tournament {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
         if (isActive == null) {
-            isActive = true;
+            isActive = false;
+        }
+        if (numberOfRounds == null) {
+            numberOfRounds = 1;
+        }
+        if (autoStart == null) {
+            autoStart = false;
         }
     }
 

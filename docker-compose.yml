@@ -5,7 +5,7 @@ services:
     image: postgres:15-alpine
     container_name: chempionat-postgres
     environment:
-      POSTGRES_DB: ${DB_NAME:-chempionat}
+      POSTGRES_DB: ${DB_NAME:-postgres}
       POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     ports:
@@ -31,11 +31,11 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-chempionat}
+      DB_NAME: ${DB_NAME:-postgres}
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-ChempionatXBot}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-8025779592:AAGFHZ5n13GIU-9lY10YJPaWA4ej7I8gSrs}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-TrojanTournamentBot}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8080:8080"
