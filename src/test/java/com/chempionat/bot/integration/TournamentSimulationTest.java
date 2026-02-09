@@ -1,0 +1,381 @@
+package com.chempionat.bot.integration;
+
+import com.chempionat.bot.application.service.*;
+import com.chempionat.bot.domain.enums.Role;
+import com.chempionat.bot.domain.enums.TournamentType;
+import com.chempionat.bot.domain.model.*;
+import com.chempionat.bot.domain.repository.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Integration test that simulates a complete tournament flow with fake users.
+ * This test demonstrates the entire lifecycle of a tournament from creation to completion.
+ */
+@SpringBootTest
+@ActiveProfiles("test")
+@Transactional
+class TournamentSimulationTest {
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private TournamentService tournamentService;
+
+    @Autowired
+    private MatchService matchService;
+
+    @Autowired
+    private MatchResultService matchResultService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private TournamentRepository tournamentRepository;
+
+    @Autowired
+    private TeamRepository teamRepository;
+
+    @Autowired
+    private MatchRepository matchRepository;
+
+    @Autowired
+    private MatchResultRepository matchResultRepository;
+
+    private User admin;
+    private User player1;
+    private User player2;
+    private User player3;
+    private User player4;
+
+    @BeforeEach
+    void setUp() {
+        // Clean up database
+        matchResultRepository.deleteAll();
+        matchRepository.deleteAll();
+        teamRepository.deleteAll();
+        tournamentRepository.deleteAll();
+        userRepository.deleteAll();
+
+        // Create fake users
+        admin = createFakeUser(1000001L, "admin_user", "Admin", "User", Role.ADMIN);
+        player1 = createFakeUser(1000002L, "player_one", "Player", "One", Role.USER);
+        player2 = createFakeUser(1000003L, "player_two", "Player", "Two", Role.USER);
+        player3 = createFakeUser(1000004L, "player_three", "Player", "Three", Role.USER);
+        player4 = createFakeUser(1000005L, "player_four", "Player", "Four", Role.USER);
+    }
+
+    private User createFakeUser(Long telegramId, String username, String firstName, String lastName, Role role) {
+        User user = new User();
+        user.setTelegramId(telegramId);
+        user.setUsername(username);
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
+        user.setRole(role);
+        return userRepository.save(user);
+    }
+
+    @Test
+    void testCompleteLeagueTournamentSimulation() {
+        System.out.println("\n=== Starting Complete League Tournament Simulation ===\n");
+
+        // Step 1: Admin creates a tournament
+        System.out.println("Step 1: Admin creates tournament...");
+        Tournament tournament = tournamentService.createTournament(
+                "Test League 2026",
+                "Integration test tournament",
+                TournamentType.LEAGUE,
+                admin
+        );
+        assertNotNull(tournament);
+        assertFalse(tournament.getIsActive());
+        System.out.println("✓ Tournament created: " + tournament.getName() + " (ID: " + tournament.getId() + ")");
+
+        // Step 2: Players join the tournament
+        System.out.println("\nStep 2: Players join tournament...");
+        Team team1 = tournamentService.joinTournament(tournament, player1, "Team Alpha");
+        Team team2 = tournamentService.joinTournament(tournament, player2, "Team Beta");
+        Team team3 = tournamentService.joinTournament(tournament, player3, "Team Gamma");
+        Team team4 = tournamentService.joinTournament(tournament, player4, "Team Delta");
+
+        assertNotNull(team1);
+        assertNotNull(team2);
+        assertNotNull(team3);
+        assertNotNull(team4);
+        System.out.println("✓ 4 teams joined the tournament");
+
+        // Step 3: Admin starts the tournament
+        System.out.println("\nStep 3: Admin starts tournament...");
+        tournamentService.startTournament(tournament.getId());
+        
+        Tournament startedTournament = tournamentRepository.findById(tournament.getId()).orElseThrow();
+        assertNotNull(startedTournament.getStartDate());
+        System.out.println("✓ Tournament started");
+
+        // Step 4: Verify matches are generated
+        System.out.println("\nStep 4: Verify match generation...");
+        List<Match> matches = matchRepository.findByTournament(tournament);
+        
+        // For 4 teams in a league (round-robin), we should have:
+        // Total matches = n * (n - 1) / 2 = 4 * 3 / 2 = 6 matches
+        int expectedMatches = 6;
+        assertEquals(expectedMatches, matches.size(), "Should generate 6 matches for 4 teams");
+        System.out.println("✓ Generated " + matches.size() + " matches");
+
+        // Print match fixtures
+        System.out.println("\n--- Match Fixtures ---");
+        for (Match match : matches) {
+            System.out.println(String.format("Match #%d: %s vs %s on %s",
+                    match.getId(),
+                    match.getHomeTeam().getName(),
+                    match.getAwayTeam().getName(),
+                    match.getScheduledTime()));
+        }
+
+        // Step 5: Simulate match result submissions
+        System.out.println("\n\nStep 5: Simulate match results...");
+        
+        // Get first 3 matches
+        Match match1 = matches.get(0);
+        Match match2 = matches.get(1);
+        Match match3 = matches.get(2);
+
+        // Match 1: Home team wins 3-1
+        System.out.println("\nSimulating Match 1: " + match1.getHomeTeam().getName() + " vs " + match1.getAwayTeam().getName());
+        submitAndApproveResult(match1, 3, 1, "fake_screenshot_url_1.jpg");
+        System.out.println("✓ Result: 3-1 (Home win)");
+
+        // Match 2: Away team wins 0-2
+        System.out.println("\nSimulating Match 2: " + match2.getHomeTeam().getName() + " vs " + match2.getAwayTeam().getName());
+        submitAndApproveResult(match2, 0, 2, "fake_screenshot_url_2.jpg");
+        System.out.println("✓ Result: 0-2 (Away win)");
+
+        // Match 3: Draw 2-2
+        System.out.println("\nSimulating Match 3: " + match3.getHomeTeam().getName() + " vs " + match3.getAwayTeam().getName());
+        submitAndApproveResult(match3, 2, 2, "fake_screenshot_url_3.jpg");
+        System.out.println("✓ Result: 2-2 (Draw)");
+
+        // Step 6: Verify match results are saved
+        System.out.println("\n\nStep 6: Verify match results...");
+        Match updatedMatch1 = matchRepository.findById(match1.getId()).orElseThrow();
+        assertEquals(3, updatedMatch1.getHomeScore());
+        assertEquals(1, updatedMatch1.getAwayScore());
+        System.out.println("✓ Match scores saved correctly");
+
+        // Step 7: Calculate and display standings
+        System.out.println("\n\nStep 7: Generate standings...");
+        List<TeamStanding> standings = calculateStandings(tournament);
+        
+        assertNotNull(standings);
+        assertFalse(standings.isEmpty());
+        
+        System.out.println("\n--- STANDINGS ---");
+        System.out.println(String.format("%-20s | %5s | %5s | %5s | %5s | %5s | %5s | %5s",
+                "Team", "P", "W", "D", "L", "GF", "GA", "Pts"));
+        System.out.println("-".repeat(80));
+        
+        for (TeamStanding standing : standings) {
+            System.out.println(String.format("%-20s | %5d | %5d | %5d | %5d | %5d | %5d | %5d",
+                    standing.getTeamName(),
+                    standing.getPlayed(),
+                    standing.getWon(),
+                    standing.getDrawn(),
+                    standing.getLost(),
+                    standing.getGoalsFor(),
+                    standing.getGoalsAgainst(),
+                    standing.getPoints()));
+        }
+
+        // Step 8: Verify standings calculations
+        System.out.println("\n\nStep 8: Verify standings logic...");
+        
+        // Find the team that won 3-1 in match1 (should have at least 3 points from that win)
+        TeamStanding winnerTeam = standings.stream()
+                .filter(s -> s.getTeamName().equals(match1.getHomeTeam().getName()))
+                .findFirst()
+                .orElseThrow();
+        
+        // We simulated 3 matches, so teams may have played 1-3 matches depending on who they faced
+        assertTrue(winnerTeam.getPlayed() >= 1, "Winner should have played at least 1 match");
+        assertTrue(winnerTeam.getWon() >= 1, "Winner should have at least 1 win (from the 3-1 victory)");
+        assertTrue(winnerTeam.getPoints() >= 3, "Winner should have at least 3 points (from the 3-1 victory)");
+        assertTrue(winnerTeam.getGoalsFor() >= 3, "Winner should have scored at least 3 goals");
+        System.out.println("✓ Standings calculations are correct");
+        System.out.println("  " + winnerTeam.getTeamName() + ": Played=" + winnerTeam.getPlayed() + 
+                ", Won=" + winnerTeam.getWon() + ", Points=" + winnerTeam.getPoints());
+
+        System.out.println("\n\n=== Tournament Simulation Completed Successfully ===\n");
+    }
+
+    @Test
+    void testPlayoffTournamentSimulation() {
+        System.out.println("\n=== Starting Playoff Tournament Simulation ===\n");
+
+        // Step 1: Create Playoff tournament
+        System.out.println("Step 1: Creating Playoff tournament...");
+        Tournament tournament = tournamentService.createTournament(
+                "Test Cup 2026",
+                "Integration test cup tournament",
+                TournamentType.PLAYOFF,
+                admin
+        );
+        assertNotNull(tournament);
+        System.out.println("✓ Playoff tournament created: " + tournament.getName());
+
+        // Step 2: Players join
+        System.out.println("\nStep 2: Players joining...");
+        Team team1 = tournamentService.joinTournament(tournament, player1, "Cup Team 1");
+        Team team2 = tournamentService.joinTournament(tournament, player2, "Cup Team 2");
+        Team team3 = tournamentService.joinTournament(tournament, player3, "Cup Team 3");
+        Team team4 = tournamentService.joinTournament(tournament, player4, "Cup Team 4");
+        
+        System.out.println("✓ 4 teams joined");
+
+        // Step 3: Start tournament
+        System.out.println("\nStep 3: Starting tournament...");
+        tournamentService.startTournament(tournament.getId());
+        System.out.println("✓ Tournament started");
+
+        // Step 4: Verify matches
+        System.out.println("\nStep 4: Verifying match generation...");
+        List<Match> matches = matchRepository.findByTournament(tournament);
+        
+        // Playoff format with 4 teams should generate bracket matches
+        // For simplicity, our implementation might do 4 teams as 2 semi-finals + final (3 matches)
+        // or round-robin depending on implementation
+        assertTrue(matches.size() > 0, "Should generate matches");
+        System.out.println("✓ Generated " + matches.size() + " matches for Playoff format");
+
+        System.out.println("\n--- Playoff Bracket ---");
+        for (Match match : matches) {
+            System.out.println(String.format("Match #%d: %s vs %s",
+                    match.getId(),
+                    match.getHomeTeam().getName(),
+                    match.getAwayTeam().getName()));
+        }
+
+        System.out.println("\n\n=== Playoff Tournament Simulation Completed Successfully ===\n");
+    }
+
+    @Test
+    void testMatchResultRejection() {
+        System.out.println("\n=== Testing Match Result Rejection Flow ===\n");
+
+        // Setup: Create tournament and start it
+        Tournament tournament = tournamentService.createTournament(
+                "Test Tournament", "Test", TournamentType.LEAGUE, admin);
+        
+        tournamentService.joinTournament(tournament, player1, "Team A");
+        tournamentService.joinTournament(tournament, player2, "Team B");
+        tournamentService.startTournament(tournament.getId());
+
+        List<Match> matches = matchRepository.findByTournament(tournament);
+        Match match = matches.get(0);
+
+        // Submit a result
+        System.out.println("Submitting result...");
+        MatchResult result = matchResultService.submitResult(
+                match,
+                player1,
+                3, 1,
+                "screenshot.jpg"
+        );
+        assertNotNull(result);
+        System.out.println("✓ Result submitted");
+
+        // Reject the result
+        System.out.println("\nRejecting result...");
+        matchResultService.rejectResult(result.getId(), admin, "Photo is not clear");
+        
+        MatchResult rejectedResult = matchResultRepository.findById(result.getId()).orElseThrow();
+        assertFalse(rejectedResult.getIsApproved());
+        assertEquals("Photo is not clear", rejectedResult.getReviewComment());
+        System.out.println("✓ Result rejected with reason: " + rejectedResult.getReviewComment());
+
+        System.out.println("\n=== Result Rejection Test Completed ===\n");
+    }
+
+    @Test
+    void testUserCannotJoinTournamentTwice() {
+        System.out.println("\n=== Testing Duplicate Join Prevention ===\n");
+
+        Tournament tournament = tournamentService.createTournament(
+                "Test Tournament", "Test", TournamentType.LEAGUE, admin);
+
+        // First join should succeed
+        Team team1 = tournamentService.joinTournament(tournament, player1, "Team Alpha");
+        assertNotNull(team1);
+        System.out.println("✓ First join succeeded");
+
+        // Second join should fail
+        System.out.println("Attempting duplicate join...");
+        assertThrows(IllegalStateException.class, () -> {
+            tournamentService.joinTournament(tournament, player1, "Team Beta");
+        });
+        System.out.println("✓ Duplicate join prevented");
+
+        System.out.println("\n=== Duplicate Join Test Completed ===\n");
+    }
+
+    private void submitAndApproveResult(Match match, int homeScore, int awayScore, String screenshotUrl) {
+        // Get the home team's user to submit result
+        User submitter = match.getHomeTeam().getUser();
+        
+        // Submit result
+        MatchResult result = matchResultService.submitResult(
+                match,
+                submitter,
+                homeScore,
+                awayScore,
+                screenshotUrl
+        );
+
+        // Approve result as admin
+        matchResultService.approveResult(result.getId(), admin);
+    }
+
+    private List<TeamStanding> calculateStandings(Tournament tournament) {
+        List<Team> teams = tournamentService.getTournamentTeams(tournament.getId());
+        List<Match> matches = matchRepository.findByTournamentAndHomeScoreIsNotNull(tournament);
+        
+        Map<Long, TeamStanding> standingsMap = new HashMap<>();
+        
+        // Initialize standings for all teams
+        for (Team team : teams) {
+            standingsMap.put(team.getId(), new TeamStanding(team.getId(), team.getName()));
+        }
+        
+        // Calculate stats from matches
+        for (Match match : matches) {
+            if (match.getHomeScore() == null || match.getAwayScore() == null) {
+                continue;
+            }
+            
+            TeamStanding homeStanding = standingsMap.get(match.getHomeTeam().getId());
+            TeamStanding awayStanding = standingsMap.get(match.getAwayTeam().getId());
+            
+            if (homeStanding == null || awayStanding == null) {
+                continue;
+            }
+            
+            homeStanding.addMatch(match.getHomeScore(), match.getAwayScore());
+            awayStanding.addMatch(match.getAwayScore(), match.getHomeScore());
+        }
+        
+        // Sort standings
+        List<TeamStanding> standings = new ArrayList<>(standingsMap.values());
+        Collections.sort(standings);
+        
+        return standings;
+    }
+}

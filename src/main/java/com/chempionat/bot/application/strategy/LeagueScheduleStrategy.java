@@ -1,7 +1,6 @@
 package com.chempionat.bot.application.strategy;
 
 import com.chempionat.bot.application.service.RoundService;
-import com.chempionat.bot.domain.enums.MatchLifecycleState;
 import com.chempionat.bot.domain.enums.TournamentType;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.Team;
