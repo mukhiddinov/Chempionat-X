@@ -85,50 +85,59 @@ public class MyMatchesCommand implements TelegramCommand {
             // Sort matches by round
             matches.sort(Comparator.comparing(Match::getRound));
 
-            // Build message
+            // Build message with HTML formatting for clickable user links
             StringBuilder message = new StringBuilder();
-            message.append("⚽ Mening o'yinlarim\n");
-            message.append("🏆 ").append(tournament.getName()).append("\n\n");
+            message.append("⚽ <b>Mening o'yinlarim</b>\n");
+            message.append("🏆 ").append(escapeHtml(tournament.getName())).append("\n\n");
 
-            // Group matches by round
+            // Group matches by round (maintain insertion order)
             Map<Integer, List<Match>> matchesByRound = matches.stream()
-                .collect(Collectors.groupingBy(Match::getRound));
+                .collect(Collectors.groupingBy(Match::getRound, LinkedHashMap::new, Collectors.toList()));
 
             for (Map.Entry<Integer, List<Match>> entry : matchesByRound.entrySet()) {
                 Integer round = entry.getKey();
                 List<Match> roundMatches = entry.getValue();
 
-                message.append("📅 Round ").append(round).append("\n");
+                message.append("📅 <b>Round ").append(round).append("</b>\n");
 
                 for (Match match : roundMatches) {
-                    String homeTeamName = match.getHomeTeam().getName();
-                    String awayTeamName = match.getAwayTeam().getName();
-                    String homeUser = match.getHomeTeam().getUser().getUsername();
-                    String awayUser = match.getAwayTeam().getUser().getUsername();
+                    boolean isHome = match.getHomeTeam().getId().equals(userTeam.getId());
                     
-                    // Handle null usernames
-                    if (homeUser == null || homeUser.isEmpty()) {
-                        homeUser = match.getHomeTeam().getUser().getFirstName();
-                    }
-                    if (awayUser == null || awayUser.isEmpty()) {
-                        awayUser = match.getAwayTeam().getUser().getFirstName();
-                    }
+                    // Format user links - clickable to Telegram profile
+                    String homeUserLink = formatHomeUserLink(match.getHomeTeam().getUser());
+                    String awayUserLink = formatAwayUserLink(match.getAwayTeam().getUser());
 
                     message.append("   ");
 
-                    // Check if played
-                    if (match.getState() == MatchLifecycleState.APPROVED || 
-                        match.getState() == MatchLifecycleState.PLAYED) {
+                    // Check if result exists in DB (regardless of state)
+                    boolean hasResult = match.getHomeScore() != null && match.getAwayScore() != null;
+                    
+                    if (hasResult) {
                         // Show with score
-                        message.append(homeTeamName).append(" ")
-                               .append(match.getHomeScore()).append(":")
-                               .append(match.getAwayScore()).append(" ")
-                               .append(awayTeamName);
+                        if (isHome) {
+                            message.append("🏠 ").append(homeUserLink).append(" ")
+                                   .append("<b>").append(match.getHomeScore()).append(":")
+                                   .append(match.getAwayScore()).append("</b> ")
+                                   .append(awayUserLink);
+                        } else {
+                            message.append(homeUserLink).append(" ")
+                                   .append("<b>").append(match.getHomeScore()).append(":")
+                                   .append(match.getAwayScore()).append("</b> ")
+                                   .append(awayUserLink).append(" ✈️");
+                        }
+                        // Add status indicator
+                        if (match.getState() == MatchLifecycleState.APPROVED) {
+                            message.append(" ✅");
+                        } else if (match.getState() == MatchLifecycleState.PENDING_APPROVAL) {
+                            message.append(" 🕐");
+                        }
                     } else {
-                        // Show waiting emoji
-                        message.append("@").append(homeUser)
-                               .append(" ⏳ ")
-                               .append("@").append(awayUser);
+                        // No result yet - show waiting
+                        if (isHome) {
+                            message.append("🏠 ").append(homeUserLink).append(" ⏳ ").append(awayUserLink);
+                        } else {
+                            message.append(homeUserLink).append(" ⏳ ").append(awayUserLink).append(" ✈️");
+                        }
                     }
                     message.append("\n");
                 }
@@ -138,7 +147,7 @@ public class MyMatchesCommand implements TelegramCommand {
             // Create inline keyboard with "Natija yuklash" button
             InlineKeyboardMarkup keyboard = createMatchActionKeyboard(userTeam, tournament);
 
-            bot.editMessage(chatId, messageId, message.toString(), keyboard);
+            bot.editMessageHtml(chatId, messageId, message.toString(), keyboard);
 
             log.info("User {} viewed their matches for tournament {}", userId, tournamentId);
 
@@ -146,6 +155,62 @@ public class MyMatchesCommand implements TelegramCommand {
             log.error("Error showing user matches", e);
             bot.editMessage(chatId, messageId, "❌ Xatolik yuz berdi");
         }
+    }
+
+    /**
+     * Format user as clickable link for Telegram (for home players).
+     * - If username exists: @username linking to t.me/username
+     * - If no username: firstname (no @) linking to tg://user?id=telegramId
+     */
+    private String formatHomeUserLink(User user) {
+        return formatUserLink(user, false);
+    }
+
+    /**
+     * Format user as clickable link for Telegram (for away players).
+     * - If username exists: @username linking to t.me/username
+     * - If no username: @firstname linking to tg://user?id=telegramId
+     */
+    private String formatAwayUserLink(User user) {
+        return formatUserLink(user, true);
+    }
+
+    /**
+     * Format user as clickable link for Telegram.
+     * @param user the user to format
+     * @param addAtForFirstname if true, prepend @ to firstname when no username
+     */
+    private String formatUserLink(User user, boolean addAtForFirstname) {
+        if (user == null) {
+            return "Unknown";
+        }
+        
+        String username = user.getUsername();
+        Long telegramId = user.getTelegramId();
+        String firstName = user.getFirstName() != null ? user.getFirstName() : "User";
+        
+        if (username != null && !username.isEmpty()) {
+            // Has username - link to t.me/username
+            return "<a href=\"https://t.me/" + escapeHtml(username) + "\">@" + escapeHtml(username) + "</a>";
+        } else if (telegramId != null) {
+            // No username - link firstname to tg://user?id=
+            String displayName = addAtForFirstname ? "@" + escapeHtml(firstName) : escapeHtml(firstName);
+            return "<a href=\"tg://user?id=" + telegramId + "\">" + displayName + "</a>";
+        } else {
+            // Fallback - just show firstname
+            String displayName = addAtForFirstname ? "@" + escapeHtml(firstName) : escapeHtml(firstName);
+            return displayName;
+        }
+    }
+
+    /**
+     * Escape HTML special characters.
+     */
+    private String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                   .replace("<", "&lt;")
+                   .replace(">", "&gt;");
     }
 
     private InlineKeyboardMarkup createMatchActionKeyboard(Team userTeam, Tournament tournament) {

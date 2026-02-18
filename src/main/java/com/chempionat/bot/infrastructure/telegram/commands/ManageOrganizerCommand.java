@@ -5,6 +5,7 @@ import com.chempionat.bot.domain.enums.Role;
 import com.chempionat.bot.domain.model.Tournament;
 import com.chempionat.bot.domain.model.User;
 import com.chempionat.bot.domain.repository.TournamentRepository;
+import com.chempionat.bot.infrastructure.telegram.KeyboardFactory;
 import com.chempionat.bot.infrastructure.telegram.TelegramBot;
 import com.chempionat.bot.infrastructure.telegram.TelegramCommand;
 import com.chempionat.bot.infrastructure.telegram.UserContext;
@@ -153,14 +154,17 @@ public class ManageOrganizerCommand implements TelegramCommand {
             UserContext context = UserContext.get(adminId);
             context.setImpersonatedOrganizer(organizerId);
 
+            String organizerName = organizer.getUsername() != null ? "@" + organizer.getUsername() : organizer.getFirstName();
             String message = "✅ Siz endi tashkilotchi sifatida kirgansiz!\n\n" +
-                    "👤 Tashkilotchi: " + 
-                    (organizer.getUsername() != null ? "@" + organizer.getUsername() : organizer.getFirstName()) + "\n\n" +
+                    "👤 Tashkilotchi: " + organizerName + "\n\n" +
                     "Siz endi ushbu tashkilotchining barcha turnirlarini boshqarishingiz mumkin.\n\n" +
-                    "Chiqish uchun: /exitimpersonation";
+                    "Chiqish uchun pastdagi \"🚪 Chiqish\" tugmasini bosing.";
 
-            InlineKeyboardMarkup keyboard = createImpersonationActiveKeyboard();
-            bot.editMessage(chatId, messageId, message, keyboard);
+            // Delete old message and send new with organizer keyboard
+            bot.deleteMessage(chatId, messageId);
+            
+            // Send message with organizer keyboard (includes "Chiqish" button)
+            bot.sendMessage(chatId, message, KeyboardFactory.createOrganizerMenuWithExit());
 
             log.info("Admin {} started impersonating organizer {}", adminId, organizerId);
 
@@ -203,9 +207,11 @@ public class ManageOrganizerCommand implements TelegramCommand {
         context.exitImpersonation();
 
         String message = "✅ Siz tashkilotchi profilidan chiqdingiz\n\n" +
-                "Endi o'zingiz sifatida ishlayapsiz.";
+                "Endi o'zingiz (admin) sifatida ishlayapsiz.";
 
-        bot.editMessage(chatId, messageId, message);
+        // Delete old message and send new with admin keyboard
+        bot.deleteMessage(chatId, messageId);
+        bot.sendMessage(chatId, message, KeyboardFactory.createAdminMenu());
         
         log.info("Admin {} exited impersonation", adminId);
     }

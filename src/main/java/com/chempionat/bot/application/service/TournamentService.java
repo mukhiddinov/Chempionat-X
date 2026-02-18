@@ -12,6 +12,7 @@ import com.chempionat.bot.domain.repository.TeamRepository;
 import com.chempionat.bot.domain.repository.TournamentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,7 +23,6 @@ import java.util.Optional;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TournamentService {
 
     private final TournamentRepository tournamentRepository;
@@ -30,6 +30,22 @@ public class TournamentService {
     private final MatchRepository matchRepository;
     private final TournamentFactory tournamentFactory;
     private final Map<String, TournamentScheduleStrategy> scheduleStrategies;
+    private final NotificationService notificationService;
+
+    public TournamentService(
+            TournamentRepository tournamentRepository,
+            TeamRepository teamRepository,
+            MatchRepository matchRepository,
+            TournamentFactory tournamentFactory,
+            Map<String, TournamentScheduleStrategy> scheduleStrategies,
+            @Lazy NotificationService notificationService) {
+        this.tournamentRepository = tournamentRepository;
+        this.teamRepository = teamRepository;
+        this.matchRepository = matchRepository;
+        this.tournamentFactory = tournamentFactory;
+        this.scheduleStrategies = scheduleStrategies;
+        this.notificationService = notificationService;
+    }
 
     @Transactional
     public Tournament createTournament(String name, String description, TournamentType type, User creator) {
@@ -71,11 +87,23 @@ public class TournamentService {
     public Team joinTournament(Tournament tournament, User user, String teamName) {
         log.info("User {} joining tournament {}", user.getTelegramId(), tournament.getId());
         
+        // Check if tournament already started
+        if (tournament.getStartDate() != null) {
+            throw new IllegalStateException("Tournament has already started");
+        }
+        
         // Check if user already joined
         Optional<Team> existingTeam = teamRepository.findByTournamentAndUser(tournament, user);
         if (existingTeam.isPresent()) {
             log.warn("User {} already joined tournament {}", user.getTelegramId(), tournament.getId());
             throw new IllegalStateException("You have already joined this tournament");
+        }
+        
+        // Check if tournament is full
+        long currentParticipants = teamRepository.countByTournament(tournament);
+        Integer maxParticipants = tournament.getMaxParticipants();
+        if (maxParticipants != null && currentParticipants >= maxParticipants) {
+            throw new IllegalStateException("Tournament is full");
         }
 
         Team team = Team.builder()
@@ -86,6 +114,16 @@ public class TournamentService {
 
         team = teamRepository.save(team);
         log.info("Team created: id={}, name={}, tournament={}", team.getId(), teamName, tournament.getId());
+        
+        // Check auto-start condition: if autoStart is enabled and max participants reached
+        if (Boolean.TRUE.equals(tournament.getAutoStart()) && maxParticipants != null) {
+            long newParticipantCount = currentParticipants + 1;
+            if (newParticipantCount >= maxParticipants) {
+                log.info("Auto-starting tournament {} - max participants ({}) reached", 
+                        tournament.getId(), maxParticipants);
+                startTournament(tournament.getId());
+            }
+        }
         
         return team;
     }
@@ -117,6 +155,47 @@ public class TournamentService {
         tournamentRepository.save(tournament);
 
         log.info("Tournament {} started with {} matches", tournamentId, matches.size());
+        
+        // Notify all participants that tournament has started
+        notifyParticipantsOnStart(tournament, teams, matches);
+    }
+    
+    /**
+     * Send notification to all tournament participants that the tournament has started.
+     */
+    private void notifyParticipantsOnStart(Tournament tournament, List<Team> teams, List<Match> matches) {
+        // Count real matches (exclude byes)
+        long realMatchCount = matches.stream()
+                .filter(m -> !Boolean.TRUE.equals(m.getIsBye()))
+                .filter(m -> m.getHomeTeam() != null && m.getAwayTeam() != null)
+                .filter(m -> !m.getHomeTeam().getId().equals(m.getAwayTeam().getId()))
+                .count();
+        
+        String baseMessage = String.format(
+                "🏆 Turnir boshlandi!\n\n" +
+                "📋 %s\n" +
+                "👥 Ishtirokchilar: %d\n" +
+                "⚽ Jami o'yinlar: %d\n\n" +
+                "O'yinlaringizni ko'rish uchun /mytournaments buyrug'ini yuboring.\n" +
+                "Omad tilaymiz! 🍀",
+                tournament.getName(),
+                teams.size(),
+                realMatchCount
+        );
+        
+        for (Team team : teams) {
+            if (team.getUser() != null && team.getUser().getTelegramId() != null) {
+                try {
+                    notificationService.notifyUser(team.getUser().getTelegramId(), baseMessage);
+                    log.debug("Sent start notification to user {}", team.getUser().getTelegramId());
+                } catch (Exception e) {
+                    log.error("Failed to send start notification to user {}", 
+                            team.getUser().getTelegramId(), e);
+                }
+            }
+        }
+        
+        log.info("Sent tournament start notifications to {} participants", teams.size());
     }
 
     @Transactional(readOnly = true)

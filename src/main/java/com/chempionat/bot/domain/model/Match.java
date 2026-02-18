@@ -59,6 +59,9 @@ public class Match {
 
     @Column(name = "is_bye")
     private Boolean isBye;
+    
+    @Column(name = "reject_reason")
+    private String rejectReason;
 
     @OneToOne(mappedBy = "match", cascade = CascadeType.ALL)
     private MatchResult result;

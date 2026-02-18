@@ -3,11 +3,14 @@ package com.chempionat.bot.application.service;
 import com.chempionat.bot.domain.enums.MatchLifecycleState;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.MatchResult;
+import com.chempionat.bot.domain.model.Tournament;
 import com.chempionat.bot.domain.model.User;
 import com.chempionat.bot.domain.repository.MatchRepository;
 import com.chempionat.bot.domain.repository.MatchResultRepository;
+import com.chempionat.bot.domain.repository.TournamentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -19,12 +22,26 @@ import java.util.List;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MatchResultService {
 
     private final MatchResultRepository matchResultRepository;
     private final MatchRepository matchRepository;
+    private final TournamentRepository tournamentRepository;
     private final NotificationService notificationService;
+    private final TournamentCompletionService tournamentCompletionService;
+
+    public MatchResultService(
+            MatchResultRepository matchResultRepository,
+            MatchRepository matchRepository,
+            TournamentRepository tournamentRepository,
+            NotificationService notificationService,
+            @Lazy TournamentCompletionService tournamentCompletionService) {
+        this.matchResultRepository = matchResultRepository;
+        this.matchRepository = matchRepository;
+        this.tournamentRepository = tournamentRepository;
+        this.notificationService = notificationService;
+        this.tournamentCompletionService = tournamentCompletionService;
+    }
 
     @Transactional
     public MatchResult submitResult(Match match, User submittedBy, Integer homeScore, 
@@ -84,6 +101,11 @@ public class MatchResultService {
         matchRepository.save(match);
         matchResultRepository.save(result);
         
+        // Update tournament.updatedAt to invalidate standings image cache
+        Tournament tournament = match.getTournament();
+        tournament.setUpdatedAt(LocalDateTime.now());
+        tournamentRepository.save(tournament);
+        
         log.info("Result approved for match {}: {}:{}", match.getId(), 
                 result.getHomeScore(), result.getAwayScore());
                 
@@ -96,6 +118,9 @@ public class MatchResultService {
                         result.getHomeScore(),
                         match.getAwayTeam().getName(),
                         result.getAwayScore()));
+        
+        // Check if tournament is complete and send notifications
+        tournamentCompletionService.checkAndNotifyIfComplete(tournament);
     }
 
     @Transactional
@@ -106,6 +131,7 @@ public class MatchResultService {
         // Get match and submitter before modifying associations
         Match match = result.getMatch();
         Long submitterTelegramId = result.getSubmittedBy().getTelegramId();
+        Long matchId = match.getId();
         
         // Break bidirectional association to avoid cascading a deleted entity
         match.setResult(null);
@@ -115,20 +141,40 @@ public class MatchResultService {
         // Delete the rejected result so user can resubmit
         matchResultRepository.delete(result);
         
-        // Reset match state to CREATED so it can be played again
-        match.setState(MatchLifecycleState.CREATED);
+        // Set match state to REJECTED and store the reason
+        match.setState(MatchLifecycleState.REJECTED);
+        match.setRejectReason(comment);
         match.setHomeScore(null);
         match.setAwayScore(null);
         matchRepository.save(match);
         
-        log.info("Result rejected and deleted for match {}. User can resubmit.", match.getId());
+        log.info("Result rejected for match {}. Reason: {}. User can resubmit.", matchId, comment);
         
-        // Notify submitter about rejection
-        notificationService.notifyUser(submitterTelegramId,
-                String.format("❌ Sizning natijangiz rad etildi.\n\n" +
-                        "Sabab: %s\n\n" +
-                        "Iltimos qaytadan yuboring.",
-                        comment));
+        // Notify submitter about rejection with resubmit button
+        String message = String.format(
+                "❌ Sizning natijangiz rad etildi.\n\n" +
+                "Sabab: %s\n\n" +
+                "Qayta yuborish uchun quyidagi tugmani bosing:",
+                comment);
+        
+        InlineKeyboardMarkup keyboard = createResubmitKeyboard(matchId);
+        notificationService.notifyUserWithKeyboard(submitterTelegramId, message, keyboard);
+    }
+    
+    private InlineKeyboardMarkup createResubmitKeyboard(Long matchId) {
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        
+        List<InlineKeyboardButton> row = new ArrayList<>();
+        InlineKeyboardButton resubmitButton = InlineKeyboardButton.builder()
+                .text("🔁 Qayta natija yuborish")
+                .callbackData("resubmit:" + matchId)
+                .build();
+        row.add(resubmitButton);
+        rows.add(row);
+        
+        keyboard.setKeyboard(rows);
+        return keyboard;
     }
 
     public List<MatchResult> getPendingResults() {

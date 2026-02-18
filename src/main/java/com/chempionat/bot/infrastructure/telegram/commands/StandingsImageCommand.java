@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ImageCacheService;
 import com.chempionat.bot.application.service.TeamStanding;
 import com.chempionat.bot.application.service.TournamentService;
 import com.chempionat.bot.domain.model.Match;
@@ -18,43 +19,67 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Command to display tournament standings as a PNG image with pagination.
+ * Callback format: standingsimg:{tournamentId}:{page}
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class StandingsCommand implements TelegramCommand {
+public class StandingsImageCommand implements TelegramCommand {
 
     private final TournamentService tournamentService;
     private final MatchRepository matchRepository;
+    private final ImageCacheService imageCacheService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
         Long chatId;
         Long tournamentId = null;
+        int page = 0;
+        Integer messageIdToDelete = null;
 
         if (update.hasMessage() && update.getMessage().hasText()) {
             chatId = update.getMessage().getChatId();
             String messageText = update.getMessage().getText();
-            
-            // Extract tournament ID from command
+
+            // Extract tournament ID from command: /standingsimg <id>
             String[] parts = messageText.split(" ");
             if (parts.length < 2) {
-                bot.sendMessage(chatId, "❌ Turnir ID ni kiriting: /standings <id>");
+                bot.sendMessage(chatId, "❌ Turnir ID ni kiriting: /standingsimg <id>");
                 return;
             }
-            
+
             try {
                 tournamentId = Long.parseLong(parts[1]);
+                if (parts.length > 2) {
+                    page = Integer.parseInt(parts[2]);
+                }
             } catch (NumberFormatException e) {
                 bot.sendMessage(chatId, "❌ Noto'g'ri turnir ID formati.");
                 return;
             }
-            
+
         } else if (update.hasCallbackQuery()) {
             chatId = update.getCallbackQuery().getMessage().getChatId();
+            messageIdToDelete = update.getCallbackQuery().getMessage().getMessageId();
             String callbackData = update.getCallbackQuery().getData();
-            
-            if (callbackData.startsWith("standings:")) {
-                tournamentId = Long.parseLong(callbackData.split(":")[1]);
+
+            // Format: standingsimg:{tournamentId}:{page} OR standings:{tournamentId} (legacy)
+            if (callbackData.startsWith("standingsimg:")) {
+                String[] parts = callbackData.split(":");
+                if (parts.length >= 2) {
+                    tournamentId = Long.parseLong(parts[1]);
+                    if (parts.length >= 3) {
+                        page = Integer.parseInt(parts[2]);
+                    }
+                }
+            } else if (callbackData.startsWith("standings:")) {
+                // Legacy callback format: standings:{tournamentId}
+                String[] parts = callbackData.split(":");
+                if (parts.length >= 2) {
+                    tournamentId = Long.parseLong(parts[1]);
+                }
             }
         } else {
             return;
@@ -68,12 +93,7 @@ public class StandingsCommand implements TelegramCommand {
         try {
             Optional<Tournament> tournamentOpt = tournamentService.getTournamentById(tournamentId);
             if (tournamentOpt.isEmpty()) {
-                String message = "❌ Turnir topilmadi.";
-                if (update.hasCallbackQuery()) {
-                    bot.editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), message);
-                } else {
-                    bot.sendMessage(chatId, message);
-                }
+                bot.sendMessage(chatId, "❌ Turnir topilmadi.");
                 return;
             }
 
@@ -82,52 +102,37 @@ public class StandingsCommand implements TelegramCommand {
             List<Match> matches = matchRepository.findByTournamentAndHomeScoreIsNotNull(tournament);
 
             if (teams.isEmpty()) {
-                String message = "📊 Bu turnirda hali ishtirokchilar yo'q.";
-                if (update.hasCallbackQuery()) {
-                    bot.editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), message);
-                } else {
-                    bot.sendMessage(chatId, message);
-                }
+                bot.sendMessage(chatId, "📊 Bu turnirda hali ishtirokchilar yo'q.");
                 return;
             }
 
             // Calculate standings
             List<TeamStanding> standings = calculateStandings(teams, matches);
 
-            StringBuilder message = new StringBuilder();
-            message.append("📊 ").append(tournament.getName()).append(" - Jadval\n\n");
-            message.append("```\n");
-            message.append(String.format("%-3s %-20s %2s %2s %2s %2s %3s\n", 
-                    "#", "Jamoa", "O", "G", "D", "M", "O"));
-            message.append("─".repeat(45)).append("\n");
+            int totalPages = imageCacheService.getStandingsTotalPages(standings.size());
+            page = Math.max(0, Math.min(page, totalPages - 1));
 
-            int position = 1;
-            for (TeamStanding standing : standings) {
-                message.append(String.format("%-3d %-20s %2d %2d %2d %2d %3d\n",
-                        position++,
-                        truncate(standing.getTeamName(), 20),
-                        standing.getPlayed(),
-                        standing.getWon(),
-                        standing.getDrawn(),
-                        standing.getLost(),
-                        standing.getPoints()));
+            // Generate image
+            byte[] imageData = imageCacheService.getStandingsImage(tournament, standings, page);
+
+            // Generate caption with top 3 teams
+            String caption = imageCacheService.getStandingsCaption(standings);
+
+            // Create pagination keyboard
+            InlineKeyboardMarkup keyboard = createPaginationKeyboard(tournamentId, page, totalPages);
+
+            // Delete old message if this is a callback (pagination)
+            if (messageIdToDelete != null) {
+                bot.deleteMessage(chatId, messageIdToDelete);
             }
-            
-            message.append("```\n\n");
-            message.append("O'yin - O'ynalgan, G - G'alaba, D - Durang, M - Mag'lubiyat, O - Ochko");
 
-            // Create back button keyboard
-            InlineKeyboardMarkup keyboard = createBackKeyboard(tournamentId);
-
-            if (update.hasCallbackQuery()) {
-                bot.editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), message.toString(), keyboard);
-            } else {
-                bot.sendMessage(chatId, message.toString(), keyboard);
-            }
+            // Send image with caption
+            String filename = "standings_" + tournamentId + "_" + page + ".png";
+            bot.sendPhoto(chatId, imageData, filename, caption, keyboard);
 
         } catch (Exception e) {
-            log.error("Error showing standings", e);
-            bot.sendMessage(chatId, "Xatolik yuz berdi. Iltimos qayta urinib ko'ring.");
+            log.error("Error showing standings image for tournament {}", tournamentId, e);
+            bot.sendMessage(chatId, "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring.");
         }
     }
 
@@ -162,17 +167,43 @@ public class StandingsCommand implements TelegramCommand {
                 .collect(Collectors.toList());
     }
 
-    private String truncate(String text, int maxLength) {
-        if (text.length() <= maxLength) {
-            return text;
-        }
-        return text.substring(0, maxLength - 3) + "...";
-    }
-
-    private InlineKeyboardMarkup createBackKeyboard(Long tournamentId) {
+    private InlineKeyboardMarkup createPaginationKeyboard(Long tournamentId, int currentPage, int totalPages) {
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
+        // Pagination row
+        if (totalPages > 1) {
+            List<InlineKeyboardButton> paginationRow = new ArrayList<>();
+
+            // Previous button
+            if (currentPage > 0) {
+                InlineKeyboardButton prevButton = InlineKeyboardButton.builder()
+                        .text("⬅️ Oldingi")
+                        .callbackData("standingsimg:" + tournamentId + ":" + (currentPage - 1))
+                        .build();
+                paginationRow.add(prevButton);
+            }
+
+            // Page indicator
+            InlineKeyboardButton pageButton = InlineKeyboardButton.builder()
+                    .text((currentPage + 1) + "/" + totalPages)
+                    .callbackData("noop")
+                    .build();
+            paginationRow.add(pageButton);
+
+            // Next button
+            if (currentPage < totalPages - 1) {
+                InlineKeyboardButton nextButton = InlineKeyboardButton.builder()
+                        .text("Keyingi ➡️")
+                        .callbackData("standingsimg:" + tournamentId + ":" + (currentPage + 1))
+                        .build();
+                paginationRow.add(nextButton);
+            }
+
+            rows.add(paginationRow);
+        }
+
+        // Back button
         List<InlineKeyboardButton> backRow = new ArrayList<>();
         InlineKeyboardButton backButton = InlineKeyboardButton.builder()
                 .text("⬅️ Ortga")
@@ -187,6 +218,6 @@ public class StandingsCommand implements TelegramCommand {
 
     @Override
     public String getCommandName() {
-        return "/standings";
+        return "/standingsimg";
     }
 }

@@ -49,6 +49,9 @@ public class SubmitResultCommand implements TelegramCommand {
             if (callbackData.startsWith("submit_result_user:")) {
                 // Format: submit_result_user:userId:tournamentId
                 handleShowHomeMatches(bot, chatId, userId, update.getCallbackQuery().getMessage().getMessageId(), callbackData);
+            } else if (callbackData.startsWith("resubmit:")) {
+                // Format: resubmit:matchId - handle resubmission after rejection
+                handleResubmit(bot, chatId, userId, update.getCallbackQuery().getMessage().getMessageId(), callbackData);
             } else if (callbackData.startsWith("submitresult:")) {
                 // Format: submitresult:matchId
                 Long matchId = Long.parseLong(callbackData.split(":")[1]);
@@ -100,6 +103,73 @@ public class SubmitResultCommand implements TelegramCommand {
             } else if (step.equals("score")) {
                 bot.sendMessage(chatId, "❌ Iltimos natijani X:Y formatda yuboring (masalan: 3:2).");
             }
+        }
+    }
+    
+    private void handleResubmit(TelegramBot bot, Long chatId, Long userId, Integer messageId, String callbackData) {
+        try {
+            // Format: resubmit:matchId
+            String[] parts = callbackData.split(":");
+            if (parts.length < 2) {
+                bot.editMessage(chatId, messageId, "❌ Xatolik yuz berdi.");
+                return;
+            }
+            
+            Long matchId = Long.parseLong(parts[1]);
+            Optional<Match> matchOpt = matchRepository.findById(matchId);
+            
+            if (matchOpt.isEmpty()) {
+                bot.editMessage(chatId, messageId, "❌ O'yin topilmadi.");
+                return;
+            }
+            
+            Match match = matchOpt.get();
+            
+            // Security: Only home team user can resubmit
+            if (!matchService.isHomePlayer(match, userId)) {
+                bot.editMessage(chatId, messageId, "❌ Faqat Home o'yinchi natijani qayta yuborishi mumkin.");
+                return;
+            }
+            
+            // Security: Only allow resubmit if status is REJECTED
+            if (match.getState() != MatchLifecycleState.REJECTED) {
+                if (match.getState() == MatchLifecycleState.APPROVED) {
+                    bot.editMessage(chatId, messageId, "❌ Bu o'yin natijasi allaqachon tasdiqlangan. Qayta yuborish mumkin emas.");
+                } else if (match.getState() == MatchLifecycleState.PENDING_APPROVAL) {
+                    bot.editMessage(chatId, messageId, "❌ Bu o'yin natijasi hali ko'rib chiqilmoqda. Qayta yuborish mumkin emas.");
+                } else {
+                    bot.editMessage(chatId, messageId, "❌ Bu o'yin natijasini qayta yuborish mumkin emas.");
+                }
+                return;
+            }
+            
+            // Show rejection reason if available
+            String rejectReason = match.getRejectReason();
+            String message = "📤 Natijani qayta yuborish\n\n";
+            if (rejectReason != null && !rejectReason.isEmpty()) {
+                message += "❌ Rad etilish sababi: " + rejectReason + "\n\n";
+            }
+            message += String.format("🏠 %s vs ✈️ %s\n\n",
+                    match.getHomeTeam().getName(),
+                    match.getAwayTeam().getName());
+            message += "📸 O'yin natijasining screenshot rasmini yuboring:";
+            
+            // Start submission flow
+            UserContext context = UserContext.get(userId);
+            context.setCurrentCommand(getCommandName());
+            context.setData("matchId", matchId);
+            context.setData("step", "photo");
+            context.setData("isResubmit", true);
+            
+            bot.editMessage(chatId, messageId, message);
+            
+            log.info("User {} started resubmission for match {}", userId, matchId);
+            
+        } catch (NumberFormatException e) {
+            bot.editMessage(chatId, messageId, "❌ Noto'g'ri o'yin identifikatori.");
+        } catch (Exception e) {
+            log.error("Error handling resubmit callback", e);
+            bot.editMessage(chatId, messageId, "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring.");
         }
     }
     
@@ -222,29 +292,29 @@ public class SubmitResultCommand implements TelegramCommand {
 
     private void handleScoreSubmission(TelegramBot bot, Long chatId, Long userId, 
                                       UserContext context, Long matchId, String scoreText) {
+        // Parse score (format: "X:Y") with regex validation
+        if (!scoreText.trim().matches("^\\d{1,2}:\\d{1,2}$")) {
+            bot.sendMessage(chatId, "❌ Noto'g'ri format. Iltimos X:Y formatda kiriting (masalan: 3:2).\n\nQaytadan urinib ko'ring:");
+            return; // Keep session active, don't clear context
+        }
+        
+        String[] parts = scoreText.trim().split(":");
+        int homeScore;
+        int awayScore;
         try {
-            // Parse score (format: "X:Y")
-            String[] parts = scoreText.trim().split(":");
-            if (parts.length != 2) {
-                bot.sendMessage(chatId, "❌ Noto'g'ri format. Iltimos X:Y formatda kiriting (masalan: 3:2).");
-                return;
-            }
+            homeScore = Integer.parseInt(parts[0].trim());
+            awayScore = Integer.parseInt(parts[1].trim());
             
-            int homeScore;
-            int awayScore;
-            try {
-                homeScore = Integer.parseInt(parts[0].trim());
-                awayScore = Integer.parseInt(parts[1].trim());
-                
-                if (homeScore < 0 || awayScore < 0) {
-                    bot.sendMessage(chatId, "❌ Natija manfiy bo'lishi mumkin emas.");
-                    return;
-                }
-            } catch (NumberFormatException e) {
-                bot.sendMessage(chatId, "❌ Noto'g'ri raqam formati. Iltimos X:Y formatda kiriting.");
-                return;
+            if (homeScore < 0 || awayScore < 0 || homeScore > 99 || awayScore > 99) {
+                bot.sendMessage(chatId, "❌ Natija 0-99 orasida bo'lishi kerak.\n\nQaytadan urinib ko'ring:");
+                return; // Keep session active
             }
-            
+        } catch (NumberFormatException e) {
+            bot.sendMessage(chatId, "❌ Noto'g'ri raqam formati. Iltimos X:Y formatda kiriting.\n\nQaytadan urinib ko'ring:");
+            return; // Keep session active
+        }
+        
+        try {
             String photoFileId = context.getDataAsString("photoFileId");
             Optional<User> userOpt = userService.getUserByTelegramId(userId);
             Optional<Match> matchOpt = matchRepository.findById(matchId);
@@ -277,12 +347,15 @@ public class SubmitResultCommand implements TelegramCommand {
             log.info("Result submitted for match {} by user {}: {}:{}", 
                      matchId, userId, homeScore, awayScore);
             
+            // Clear context only on successful submission
+            context.clearData();
+            
         } catch (IllegalStateException e) {
             bot.sendMessage(chatId, "❌ " + e.getMessage());
+            context.clearData();
         } catch (Exception e) {
             log.error("Error submitting result", e);
             bot.sendMessage(chatId, "❌ Natijani yuborishda xatolik yuz berdi. Qaytadan urinib ko'ring.");
-        } finally {
             context.clearData();
         }
     }

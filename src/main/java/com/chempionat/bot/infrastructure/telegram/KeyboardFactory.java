@@ -85,6 +85,35 @@ public class KeyboardFactory {
     }
 
     /**
+     * Creates the main menu keyboard for ORGANIZER with Exit button (for admin impersonation)
+     */
+    public static ReplyKeyboardMarkup createOrganizerMenuWithExit() {
+        ReplyKeyboardMarkup keyboard = new ReplyKeyboardMarkup();
+        keyboard.setResizeKeyboard(true);
+        keyboard.setOneTimeKeyboard(false);
+
+        List<KeyboardRow> rows = new ArrayList<>();
+
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add(new KeyboardButton("\uD83C\uDFC6 Mening turnirlarim"));
+        row1.add(new KeyboardButton("⚙️ Profil"));
+        rows.add(row1);
+
+        KeyboardRow row2 = new KeyboardRow();
+        row2.add(new KeyboardButton("🔧 Boshqarish"));
+        row2.add(new KeyboardButton("➕ Turnir yaratish"));
+        rows.add(row2);
+        
+        KeyboardRow row3 = new KeyboardRow();
+        row3.add(new KeyboardButton("🎯 Turnirga qo'shilish"));
+        row3.add(new KeyboardButton("🚪 Chiqish"));
+        rows.add(row3);
+
+        keyboard.setKeyboard(rows);
+        return keyboard;
+    }
+
+    /**
      * Creates the main menu keyboard for ADMIN
      */
     public static ReplyKeyboardMarkup createAdminMenu() {
@@ -171,11 +200,11 @@ public class KeyboardFactory {
         List<InlineKeyboardButton> viewRow = new ArrayList<>();
         InlineKeyboardButton standingsButton = InlineKeyboardButton.builder()
                 .text("📊 Jadval")
-                .callbackData("standings:" + tournamentId)
+                .callbackData("standingsimg:" + tournamentId + ":0")
                 .build();
         InlineKeyboardButton scheduleButton = InlineKeyboardButton.builder()
                 .text("📅 Kalendar")
-                .callbackData("schedule:" + tournamentId)
+                .callbackData("fixturesimg:" + tournamentId + ":0")
                 .build();
         viewRow.add(standingsButton);
         viewRow.add(scheduleButton);
@@ -279,7 +308,7 @@ public class KeyboardFactory {
             List<InlineKeyboardButton> row1 = new ArrayList<>();
             InlineKeyboardButton standingsButton = InlineKeyboardButton.builder()
                     .text("📊 Jadval")
-                    .callbackData("standings:" + tournamentId)
+                    .callbackData("standingsimg:" + tournamentId + ":0")
                     .build();
             row1.add(standingsButton);
             rows.add(row1);
@@ -288,7 +317,7 @@ public class KeyboardFactory {
         List<InlineKeyboardButton> row2 = new ArrayList<>();
         InlineKeyboardButton roundsButton = InlineKeyboardButton.builder()
                 .text("📅 Turlar")
-                .callbackData("rounds:" + tournamentId)
+                .callbackData("fixturesimg:" + tournamentId + ":0")
                 .build();
         row2.add(roundsButton);
         rows.add(row2);
