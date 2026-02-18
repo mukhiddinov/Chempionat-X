@@ -95,4 +95,16 @@ public class NotificationService {
             log.error("Failed to send photo notification to user {}", telegramId, e);
         }
     }
+
+    /**
+     * Send photo from byte array with caption to specific user
+     */
+    public void notifyUserWithImage(Long telegramId, byte[] imageData, String filename, String caption) {
+        try {
+            telegramBot.sendPhoto(telegramId, imageData, filename, caption);
+            log.debug("Image notification sent to user: {}", telegramId);
+        } catch (Exception e) {
+            log.error("Failed to send image notification to user {}", telegramId, e);
+        }
+    }
 }

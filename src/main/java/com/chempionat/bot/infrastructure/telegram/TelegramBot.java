@@ -122,6 +122,23 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    public void editMessageHtml(Long chatId, Integer messageId, String htmlText, InlineKeyboardMarkup keyboard) {
+        EditMessageText editMessage = EditMessageText.builder()
+                .chatId(chatId.toString())
+                .messageId(messageId)
+                .text(htmlText)
+                .parseMode("HTML")
+                .disableWebPagePreview(true)
+                .replyMarkup(keyboard)
+                .build();
+        try {
+            execute(editMessage);
+            log.debug("HTML message with keyboard edited in chat {}", chatId);
+        } catch (TelegramApiException e) {
+            log.error("Failed to edit HTML message in chat {}", chatId, e);
+        }
+    }
+
     public void sendPhoto(Long chatId, String photoFileId, String caption) {
         SendPhoto photo = SendPhoto.builder()
                 .chatId(chatId.toString())
@@ -133,6 +150,51 @@ public class TelegramBot extends TelegramLongPollingBot {
             log.debug("Photo sent to chat {}", chatId);
         } catch (TelegramApiException e) {
             log.error("Failed to send photo to chat {}", chatId, e);
+        }
+    }
+
+    public void sendPhoto(Long chatId, byte[] imageData, String filename, String caption, InlineKeyboardMarkup keyboard) {
+        java.io.ByteArrayInputStream inputStream = new java.io.ByteArrayInputStream(imageData);
+        SendPhoto photo = SendPhoto.builder()
+                .chatId(chatId.toString())
+                .photo(new InputFile(inputStream, filename))
+                .caption(caption)
+                .replyMarkup(keyboard)
+                .build();
+        try {
+            execute(photo);
+            log.debug("Photo with keyboard sent to chat {}", chatId);
+        } catch (TelegramApiException e) {
+            log.error("Failed to send photo to chat {}", chatId, e);
+        }
+    }
+
+    public void sendPhoto(Long chatId, byte[] imageData, String filename, String caption) {
+        java.io.ByteArrayInputStream inputStream = new java.io.ByteArrayInputStream(imageData);
+        SendPhoto photo = SendPhoto.builder()
+                .chatId(chatId.toString())
+                .photo(new InputFile(inputStream, filename))
+                .caption(caption)
+                .build();
+        try {
+            execute(photo);
+            log.debug("Photo sent to chat {}", chatId);
+        } catch (TelegramApiException e) {
+            log.error("Failed to send photo to chat {}", chatId, e);
+        }
+    }
+
+    public void deleteMessage(Long chatId, Integer messageId) {
+        org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage deleteMessage = 
+                org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage.builder()
+                        .chatId(chatId.toString())
+                        .messageId(messageId)
+                        .build();
+        try {
+            execute(deleteMessage);
+            log.debug("Message {} deleted from chat {}", messageId, chatId);
+        } catch (TelegramApiException e) {
+            log.error("Failed to delete message {} from chat {}", messageId, chatId, e);
         }
     }
 }

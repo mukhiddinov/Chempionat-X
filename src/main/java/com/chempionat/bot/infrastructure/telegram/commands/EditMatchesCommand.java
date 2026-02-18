@@ -1,9 +1,11 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.TournamentCompletionService;
 import com.chempionat.bot.application.service.TournamentService;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.Tournament;
 import com.chempionat.bot.domain.repository.MatchRepository;
+import com.chempionat.bot.domain.repository.TournamentRepository;
 import com.chempionat.bot.infrastructure.telegram.TelegramBot;
 import com.chempionat.bot.infrastructure.telegram.TelegramCommand;
 import com.chempionat.bot.infrastructure.telegram.UserContext;
@@ -15,6 +17,7 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +30,8 @@ public class EditMatchesCommand implements TelegramCommand {
 
     private final TournamentService tournamentService;
     private final MatchRepository matchRepository;
+    private final TournamentRepository tournamentRepository;
+    private final TournamentCompletionService tournamentCompletionService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
@@ -279,6 +284,8 @@ public class EditMatchesCommand implements TelegramCommand {
         context.setCurrentCommand(getCommandName());
         context.setData("editing_match_id", matchId);
         context.setData("editing_field", "home_score");
+        context.setData("editing_message_id", messageId);
+        context.setData("editing_chat_id", chatId);
 
         bot.editMessage(chatId, messageId, 
                 "🏠 Uy egasi hisobini kiriting (0-99):\n\n" +
@@ -294,6 +301,8 @@ public class EditMatchesCommand implements TelegramCommand {
         context.setCurrentCommand(getCommandName());
         context.setData("editing_match_id", matchId);
         context.setData("editing_field", "away_score");
+        context.setData("editing_message_id", messageId);
+        context.setData("editing_chat_id", chatId);
 
         bot.editMessage(chatId, messageId, 
                 "✈️ Mehmon hisobini kiriting (0-99):\n\n" +
@@ -312,6 +321,8 @@ public class EditMatchesCommand implements TelegramCommand {
 
         Long matchId = context.getDataAsLong("editing_match_id");
         String field = context.getDataAsString("editing_field");
+        Integer originalMessageId = context.getDataAsInteger("editing_message_id");
+        Long originalChatId = context.getDataAsLong("editing_chat_id");
 
         if (matchId == null || field == null) {
             bot.sendMessage(chatId, "❌ Xatolik yuz berdi");
@@ -337,16 +348,38 @@ public class EditMatchesCommand implements TelegramCommand {
             }
 
             matchRepository.save(match);
-
-            String message = "✅ Hisob yangilandi!\n\n" +
-                    buildMatchSummary(match);
-
-            bot.sendMessage(chatId, message);
+            
+            // Update tournament.updatedAt to invalidate standings image cache
+            Tournament tournament = match.getTournament();
+            tournament.setUpdatedAt(LocalDateTime.now());
+            tournamentRepository.save(tournament);
             
             log.info("Match {} score updated: {}:{} by user {}", 
                      matchId, match.getHomeScore(), match.getAwayScore(), update.getMessage().getFrom().getId());
 
+            // Delete user's text message to keep chat clean
+            try {
+                bot.deleteMessage(chatId, update.getMessage().getMessageId());
+            } catch (Exception e) {
+                // Ignore if can't delete
+            }
+
+            // Edit the original message with updated match info and keyboard
+            if (originalMessageId != null && originalChatId != null) {
+                String message = buildMatchEditMessage(match);
+                InlineKeyboardMarkup keyboard = createMatchEditKeyboard(match);
+                bot.editMessage(originalChatId, originalMessageId, message, keyboard);
+            } else {
+                // Fallback: send new message with keyboard
+                String message = "✅ Hisob yangilandi!\n\n" + buildMatchEditMessage(match);
+                InlineKeyboardMarkup keyboard = createMatchEditKeyboard(match);
+                bot.sendMessage(chatId, message, keyboard);
+            }
+
             context.clearData();
+            
+            // Check if tournament is complete and send notifications
+            tournamentCompletionService.checkAndNotifyIfComplete(tournament);
 
         } catch (NumberFormatException e) {
             bot.sendMessage(chatId, "❌ Iltimos, faqat raqam kiriting:");

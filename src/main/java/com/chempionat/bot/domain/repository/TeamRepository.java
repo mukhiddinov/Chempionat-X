@@ -14,4 +14,5 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     List<Team> findByTournament(Tournament tournament);
     List<Team> findByUser(User user);
     Optional<Team> findByTournamentAndUser(Tournament tournament, User user);
+    long countByTournament(Tournament tournament);
 }

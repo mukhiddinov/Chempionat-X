@@ -13,6 +13,7 @@ import com.chempionat.bot.infrastructure.telegram.TelegramCommand;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
@@ -63,7 +64,18 @@ public class TournamentDetailsCommand implements TelegramCommand {
                 KeyboardFactory.createTournamentDetailsKeyboard(tournamentId, isLeague);
             
             if (update.hasCallbackQuery()) {
-                bot.editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), message, keyboard);
+                Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
+                // Check if previous message was a photo (has no text) - we need to delete and send new
+                // MaybeInaccessibleMessage doesn't have hasText(), so cast to Message and check
+                var maybeMsg = update.getCallbackQuery().getMessage();
+                boolean hasText = (maybeMsg instanceof Message msg) && msg.hasText();
+                if (hasText) {
+                    bot.editMessage(chatId, messageId, message, keyboard);
+                } else {
+                    // Previous message was a photo, delete it and send new text message
+                    bot.deleteMessage(chatId, messageId);
+                    bot.sendMessage(chatId, message, keyboard);
+                }
             } else {
                 bot.sendMessage(chatId, message, keyboard);
             }
@@ -91,7 +103,7 @@ public class TournamentDetailsCommand implements TelegramCommand {
             List<InlineKeyboardButton> row1 = new ArrayList<>();
             InlineKeyboardButton standingsButton = InlineKeyboardButton.builder()
                     .text("📊 Jadval")
-                    .callbackData("standings:" + tournamentId)
+                    .callbackData("standingsimg:" + tournamentId + ":0")
                     .build();
             row1.add(standingsButton);
             rows.add(row1);
@@ -100,7 +112,7 @@ public class TournamentDetailsCommand implements TelegramCommand {
         List<InlineKeyboardButton> row2 = new ArrayList<>();
         InlineKeyboardButton roundsButton = InlineKeyboardButton.builder()
                 .text("📅 Turlar")
-                .callbackData("rounds:" + tournamentId)
+                .callbackData("fixturesimg:" + tournamentId + ":0")
                 .build();
         row2.add(roundsButton);
         rows.add(row2);

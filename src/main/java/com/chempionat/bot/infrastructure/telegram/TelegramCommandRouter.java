@@ -92,6 +92,7 @@ public class TelegramCommandRouter {
                 callbackData.startsWith("standings:") ||
                 callbackData.startsWith("schedule:") ||
                 callbackData.startsWith("submitresult:") ||
+                callbackData.startsWith("resubmit:") ||
                 callbackData.startsWith("approve:") ||
                 callbackData.startsWith("reject:") ||
                 callbackData.startsWith("approveorganizer:") ||
@@ -119,6 +120,10 @@ public class TelegramCommandRouter {
                 callbackData.equals("exit_impersonation") ||
                 callbackData.equals("back_to_organizers") ||
                 callbackData.equals("back_to_manage_list") ||
+                callbackData.startsWith("standingsimg:") ||
+                callbackData.startsWith("fixturesimg:") ||
+                callbackData.startsWith("roundimg:") ||
+                callbackData.equals("noop") ||
                 callbackData.startsWith("page:")) {
                 
                 // These callbacks should be handled by their respective commands
@@ -202,6 +207,7 @@ public class TelegramCommandRouter {
             case "🔧 Boshqarish" -> "/managetournaments";
             case "👥 Tashkilotchilar" -> "/organizers";
             case "➕ Turnir yaratish" -> "/createtournament";
+            case "🚪 Chiqish" -> "/exitimpersonation";
             default -> normalized;
         };
     }
@@ -213,7 +219,7 @@ public class TelegramCommandRouter {
             // rounds:123 (tournament rounds view) vs rounds:1 (number of rounds selection)
             try {
                 Long.parseLong(callbackData.split(":")[1]);
-                return "/rounds"; // Tournament rounds view
+                return "/fixturesimg"; // Tournament rounds view - now uses image rendering
             } catch (NumberFormatException e) {
                 return "/createtournament"; // Number of rounds selection
             }
@@ -222,9 +228,9 @@ public class TelegramCommandRouter {
         } else if (callbackData.startsWith("jointournament:")) {
             return "/jointournament";
         } else if (callbackData.startsWith("standings:")) {
-            return "/standings";
+            return "/standingsimg";
         } else if (callbackData.startsWith("schedule:")) {
-            return "/schedule";
+            return "/fixturesimg";
         } else if (callbackData.startsWith("submitresult:")) {
             return "/submitresult";
         } else if (callbackData.startsWith("approve:")) {
@@ -242,7 +248,8 @@ public class TelegramCommandRouter {
         } else if (callbackData.startsWith("my_matches:")) {
             return "/mymatches";
         } else if (callbackData.startsWith("submit_result_user:") ||
-                   callbackData.startsWith("submitresult:")) {
+                   callbackData.startsWith("submitresult:") ||
+                   callbackData.startsWith("resubmit:")) {
             return "/submitresult";
         } else if (callbackData.startsWith("manage_tournament:") ||
                    callbackData.startsWith("start_tournament:") ||
@@ -273,6 +280,14 @@ public class TelegramCommandRouter {
         } else if (callbackData.startsWith("page:")) {
             // Handle pagination callbacks
             return extractPageHandler(callbackData);
+        } else if (callbackData.startsWith("standingsimg:")) {
+            return "/standingsimg";
+        } else if (callbackData.startsWith("fixturesimg:")) {
+            return "/fixturesimg";
+        } else if (callbackData.startsWith("roundimg:")) {
+            return "/roundimg";
+        } else if (callbackData.equals("noop")) {
+            return null; // Ignore no-op callbacks
         }
         return null;
     }
