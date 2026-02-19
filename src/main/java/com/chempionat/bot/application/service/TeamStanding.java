@@ -26,6 +26,7 @@ public class TeamStanding implements Comparable<TeamStanding> {
     private int goalsAgainst;
     private int goalDifference;
     private int points;
+    private int position; // For bracket-based tournaments
     
     public TeamStanding(Long teamId, String teamName) {
         this.teamId = teamId;

@@ -1,7 +1,9 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.SingleEliminationService;
 import com.chempionat.bot.application.service.TeamStanding;
 import com.chempionat.bot.application.service.TournamentService;
+import com.chempionat.bot.domain.enums.TournamentType;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.Team;
 import com.chempionat.bot.domain.model.Tournament;
@@ -25,6 +27,7 @@ public class StandingsCommand implements TelegramCommand {
 
     private final TournamentService tournamentService;
     private final MatchRepository matchRepository;
+    private final SingleEliminationService singleEliminationService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
@@ -91,30 +94,62 @@ public class StandingsCommand implements TelegramCommand {
                 return;
             }
 
-            // Calculate standings
-            List<TeamStanding> standings = calculateStandings(teams, matches);
+            // Calculate standings based on tournament type
+            List<TeamStanding> standings;
+            boolean isPlayoff = tournament.getType() == TournamentType.PLAYOFF;
+            
+            if (isPlayoff) {
+                // Use bracket-based placement for single elimination
+                standings = singleEliminationService.calculateBracketPlacements(tournament);
+            } else {
+                // Use league-style points-based standings
+                standings = calculateStandings(teams, matches);
+            }
 
             StringBuilder message = new StringBuilder();
             message.append("📊 ").append(tournament.getName()).append(" - Jadval\n\n");
-            message.append("```\n");
-            message.append(String.format("%-3s %-20s %2s %2s %2s %2s %3s\n", 
-                    "#", "Jamoa", "O", "G", "D", "M", "O"));
-            message.append("─".repeat(45)).append("\n");
-
-            int position = 1;
-            for (TeamStanding standing : standings) {
-                message.append(String.format("%-3d %-20s %2d %2d %2d %2d %3d\n",
-                        position++,
-                        truncate(standing.getTeamName(), 20),
-                        standing.getPlayed(),
-                        standing.getWon(),
-                        standing.getDrawn(),
-                        standing.getLost(),
-                        standing.getPoints()));
-            }
             
-            message.append("```\n\n");
-            message.append("O'yin - O'ynalgan, G - G'alaba, D - Durang, M - Mag'lubiyat, O - Ochko");
+            if (isPlayoff) {
+                // Bracket-based display for playoffs
+                message.append("```\n");
+                message.append(String.format("%-3s %-20s\n", "#", "Jamoa"));
+                message.append("─".repeat(25)).append("\n");
+                
+                for (TeamStanding standing : standings) {
+                    String medal = switch (standing.getPosition()) {
+                        case 1 -> "🥇";
+                        case 2 -> "🥈";
+                        case 3 -> "🥉";
+                        default -> "  ";
+                    };
+                    message.append(String.format("%s %-3d %-20s\n",
+                            medal,
+                            standing.getPosition(),
+                            truncate(standing.getTeamName(), 20)));
+                }
+                message.append("```\n");
+            } else {
+                // League table display
+                message.append("```\n");
+                message.append(String.format("%-3s %-20s %2s %2s %2s %2s %3s\n", 
+                        "#", "Jamoa", "O", "G", "D", "M", "O"));
+                message.append("─".repeat(45)).append("\n");
+
+                int position = 1;
+                for (TeamStanding standing : standings) {
+                    message.append(String.format("%-3d %-20s %2d %2d %2d %2d %3d\n",
+                            position++,
+                            truncate(standing.getTeamName(), 20),
+                            standing.getPlayed(),
+                            standing.getWon(),
+                            standing.getDrawn(),
+                            standing.getLost(),
+                            standing.getPoints()));
+                }
+                
+                message.append("```\n\n");
+                message.append("O'yin - O'ynalgan, G - G'alaba, D - Durang, M - Mag'lubiyat, O - Ochko");
+            }
 
             // Create back button keyboard
             InlineKeyboardMarkup keyboard = createBackKeyboard(tournamentId);

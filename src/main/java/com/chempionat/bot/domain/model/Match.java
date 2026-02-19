@@ -62,6 +62,28 @@ public class Match {
     
     @Column(name = "reject_reason")
     private String rejectReason;
+    
+    /**
+     * Position in bracket tree for knockout tournaments (1-based).
+     * Used for ordering and rendering bracket visualization.
+     */
+    @Column(name = "bracket_position")
+    private Integer bracketPosition;
+    
+    /**
+     * Reference to the next match where winner advances.
+     * Null for final match.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "next_match_id")
+    private Match nextMatch;
+    
+    /**
+     * True if winner goes to home_team slot of next match,
+     * False if winner goes to away_team slot.
+     */
+    @Column(name = "winner_to_home")
+    private Boolean winnerToHome;
 
     @OneToOne(mappedBy = "match", cascade = CascadeType.ALL)
     private MatchResult result;

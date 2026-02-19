@@ -123,6 +123,8 @@ public class TelegramCommandRouter {
                 callbackData.startsWith("standingsimg:") ||
                 callbackData.startsWith("fixturesimg:") ||
                 callbackData.startsWith("roundimg:") ||
+                callbackData.startsWith("bracket:") ||
+                callbackData.startsWith("bracketimg:") ||
                 callbackData.equals("noop") ||
                 callbackData.startsWith("page:")) {
                 
@@ -286,6 +288,8 @@ public class TelegramCommandRouter {
             return "/fixturesimg";
         } else if (callbackData.startsWith("roundimg:")) {
             return "/roundimg";
+        } else if (callbackData.startsWith("bracket:") || callbackData.startsWith("bracketimg:")) {
+            return "/bracket";
         } else if (callbackData.equals("noop")) {
             return null; // Ignore no-op callbacks
         }

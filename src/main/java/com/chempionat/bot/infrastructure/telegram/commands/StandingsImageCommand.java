@@ -1,8 +1,10 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
 import com.chempionat.bot.application.service.ImageCacheService;
+import com.chempionat.bot.application.service.SingleEliminationService;
 import com.chempionat.bot.application.service.TeamStanding;
 import com.chempionat.bot.application.service.TournamentService;
+import com.chempionat.bot.domain.enums.TournamentType;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.Team;
 import com.chempionat.bot.domain.model.Tournament;
@@ -31,6 +33,7 @@ public class StandingsImageCommand implements TelegramCommand {
     private final TournamentService tournamentService;
     private final MatchRepository matchRepository;
     private final ImageCacheService imageCacheService;
+    private final SingleEliminationService singleEliminationService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
@@ -106,8 +109,15 @@ public class StandingsImageCommand implements TelegramCommand {
                 return;
             }
 
-            // Calculate standings
-            List<TeamStanding> standings = calculateStandings(teams, matches);
+            // Calculate standings based on tournament type
+            List<TeamStanding> standings;
+            if (tournament.getType() == TournamentType.PLAYOFF) {
+                // Use bracket-based placement for single elimination
+                standings = singleEliminationService.calculateBracketPlacements(tournament);
+            } else {
+                // Use league-style points-based standings
+                standings = calculateStandings(teams, matches);
+            }
 
             int totalPages = imageCacheService.getStandingsTotalPages(standings.size());
             page = Math.max(0, Math.min(page, totalPages - 1));
