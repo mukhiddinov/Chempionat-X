@@ -1,5 +1,6 @@
 package com.chempionat.bot.domain.model;
 
+import com.chempionat.bot.domain.enums.TournamentStatus;
 import com.chempionat.bot.domain.enums.TournamentType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -52,6 +53,13 @@ public class Tournament {
 
     @Column(name = "auto_start")
     private Boolean autoStart;
+    
+    /**
+     * Tournament lifecycle status for proper state management.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status")
+    private TournamentStatus status;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -71,6 +79,9 @@ public class Tournament {
         }
         if (autoStart == null) {
             autoStart = false;
+        }
+        if (status == null) {
+            status = TournamentStatus.CREATED;
         }
     }
 

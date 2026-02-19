@@ -107,6 +107,15 @@ public class TournamentDetailsCommand implements TelegramCommand {
                     .build();
             row1.add(standingsButton);
             rows.add(row1);
+        } else {
+            // Playoff: Show bracket button
+            List<InlineKeyboardButton> bracketRow = new ArrayList<>();
+            InlineKeyboardButton bracketButton = InlineKeyboardButton.builder()
+                    .text("🏆 Bracket")
+                    .callbackData("bracket:" + tournamentId)
+                    .build();
+            bracketRow.add(bracketButton);
+            rows.add(bracketRow);
         }
 
         List<InlineKeyboardButton> row2 = new ArrayList<>();

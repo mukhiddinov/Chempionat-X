@@ -99,6 +99,12 @@ public class TournamentService {
             throw new IllegalStateException("You have already joined this tournament");
         }
         
+        // Check if team name is unique in this tournament (case-insensitive)
+        if (teamRepository.existsByTournamentAndNameIgnoreCase(tournament, teamName)) {
+            log.warn("Team name '{}' already exists in tournament {}", teamName, tournament.getId());
+            throw new IllegalStateException("Bu nomdagi jamoa allaqachon mavjud. Iltimos boshqa nom tanlang.");
+        }
+        
         // Check if tournament is full
         long currentParticipants = teamRepository.countByTournament(tournament);
         Integer maxParticipants = tournament.getMaxParticipants();

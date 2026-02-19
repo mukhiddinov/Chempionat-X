@@ -1,8 +1,10 @@
 package com.chempionat.bot.application.service;
 
 import com.chempionat.bot.domain.enums.MatchLifecycleState;
+import com.chempionat.bot.domain.enums.TournamentType;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.MatchResult;
+import com.chempionat.bot.domain.model.Team;
 import com.chempionat.bot.domain.model.Tournament;
 import com.chempionat.bot.domain.model.User;
 import com.chempionat.bot.domain.repository.MatchRepository;
@@ -29,18 +31,21 @@ public class MatchResultService {
     private final TournamentRepository tournamentRepository;
     private final NotificationService notificationService;
     private final TournamentCompletionService tournamentCompletionService;
+    private final SingleEliminationService singleEliminationService;
 
     public MatchResultService(
             MatchResultRepository matchResultRepository,
             MatchRepository matchRepository,
             TournamentRepository tournamentRepository,
             NotificationService notificationService,
-            @Lazy TournamentCompletionService tournamentCompletionService) {
+            @Lazy TournamentCompletionService tournamentCompletionService,
+            @Lazy SingleEliminationService singleEliminationService) {
         this.matchResultRepository = matchResultRepository;
         this.matchRepository = matchRepository;
         this.tournamentRepository = tournamentRepository;
         this.notificationService = notificationService;
         this.tournamentCompletionService = tournamentCompletionService;
+        this.singleEliminationService = singleEliminationService;
     }
 
     @Transactional
@@ -119,8 +124,27 @@ public class MatchResultService {
                         match.getAwayTeam().getName(),
                         result.getAwayScore()));
         
-        // Check if tournament is complete and send notifications
-        tournamentCompletionService.checkAndNotifyIfComplete(tournament);
+        // Handle playoff-specific logic: winner propagation
+        if (tournament.getType() == TournamentType.PLAYOFF) {
+            handlePlayoffMatchApproval(match);
+        } else {
+            // For league tournaments, check if tournament is complete
+            tournamentCompletionService.checkAndNotifyIfComplete(tournament);
+        }
+    }
+    
+    /**
+     * Handle playoff match approval: propagate winner and notify eliminated team.
+     */
+    private void handlePlayoffMatchApproval(Match match) {
+        // Propagate winner to next match
+        singleEliminationService.propagateWinner(match);
+        
+        // Notify eliminated team
+        Team loser = singleEliminationService.determineLoser(match);
+        if (loser != null && !Boolean.TRUE.equals(match.getIsBye())) {
+            singleEliminationService.notifyElimination(loser, match);
+        }
     }
 
     @Transactional

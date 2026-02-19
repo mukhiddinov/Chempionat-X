@@ -1,5 +1,6 @@
 package com.chempionat.bot.application.service;
 
+import com.chempionat.bot.domain.enums.TournamentType;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.Team;
 import com.chempionat.bot.domain.model.Tournament;
@@ -20,6 +21,7 @@ import java.util.stream.Collectors;
 
 /**
  * Service to check tournament completion and send end-of-tournament notifications.
+ * Handles both league (points-based) and playoff (bracket-based) standings.
  */
 @Slf4j
 @Service
@@ -31,6 +33,7 @@ public class TournamentCompletionService {
     private final TournamentRepository tournamentRepository;
     private final StandingsImageRenderer standingsImageRenderer;
     private final NotificationService notificationService;
+    private final SingleEliminationService singleEliminationService;
 
     /**
      * Check if all real matches (excluding byes) in a tournament are completed.
@@ -104,8 +107,15 @@ public class TournamentCompletionService {
                 return;
             }
             
-            // Calculate final standings
-            List<TeamStanding> standings = calculateStandings(teams, matches);
+            // Calculate final standings based on tournament type
+            List<TeamStanding> standings;
+            if (tournament.getType() == TournamentType.PLAYOFF) {
+                // Use bracket-based placement for single elimination
+                standings = singleEliminationService.calculateBracketPlacements(tournament);
+            } else {
+                // Use league-style points-based standings
+                standings = calculateLeagueStandings(teams, matches);
+            }
             
             // Generate standings image
             byte[] imageData = standingsImageRenderer.render(tournament.getName(), standings, 0);
@@ -139,7 +149,7 @@ public class TournamentCompletionService {
         }
     }
 
-    private List<TeamStanding> calculateStandings(List<Team> teams, List<Match> matches) {
+    private List<TeamStanding> calculateLeagueStandings(List<Team> teams, List<Match> matches) {
         Map<Long, TeamStanding> standingsMap = new HashMap<>();
         
         // Initialize standings for all teams

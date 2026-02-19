@@ -1,6 +1,7 @@
 package com.chempionat.bot.integration;
 
 import com.chempionat.bot.application.service.*;
+import com.chempionat.bot.domain.enums.MatchLifecycleState;
 import com.chempionat.bot.domain.enums.Role;
 import com.chempionat.bot.domain.enums.TournamentType;
 import com.chempionat.bot.domain.model.*;
@@ -295,12 +296,18 @@ class TournamentSimulationTest {
 
         // Reject the result
         System.out.println("\nRejecting result...");
-        matchResultService.rejectResult(result.getId(), admin, "Photo is not clear");
+        Long resultId = result.getId();
+        matchResultService.rejectResult(resultId, admin, "Photo is not clear");
         
-        MatchResult rejectedResult = matchResultRepository.findById(result.getId()).orElseThrow();
-        assertFalse(rejectedResult.getIsApproved());
-        assertEquals("Photo is not clear", rejectedResult.getReviewComment());
-        System.out.println("✓ Result rejected with reason: " + rejectedResult.getReviewComment());
+        // Result is deleted after rejection so user can resubmit
+        assertTrue(matchResultRepository.findById(resultId).isEmpty());
+        System.out.println("✓ Result deleted after rejection");
+        
+        // Match should be in REJECTED state with the reason stored
+        Match updatedMatch = matchRepository.findById(match.getId()).orElseThrow();
+        assertEquals(MatchLifecycleState.REJECTED, updatedMatch.getState());
+        assertEquals("Photo is not clear", updatedMatch.getRejectReason());
+        System.out.println("✓ Match in REJECTED state with reason: " + updatedMatch.getRejectReason());
 
         System.out.println("\n=== Result Rejection Test Completed ===\n");
     }
