@@ -14,6 +14,9 @@ import java.util.List;
 /**
  * Service for generating and caching tournament images.
  * Images are cached by tournament ID, page, and last update time.
+ * 
+ * IMPORTANT: Cache invalidation relies on tournament.updatedAt being updated
+ * whenever standings change (result approval, match completion, etc.)
  */
 @Slf4j
 @Service
@@ -25,11 +28,23 @@ public class ImageCacheService {
 
     /**
      * Get standings image from cache or generate new one.
-     * Cache key includes tournament ID, page, and last updated timestamp.
+     * Cache key includes tournament ID, page, and full updatedAt timestamp (epoch millis).
+     * This ensures any change to tournament.updatedAt invalidates the cache.
      */
-    @Cacheable(value = CacheConfig.IMAGE_CACHE, key = "'standings:' + #tournament.id + ':' + #page + ':' + #tournament.updatedAt?.toLocalDate()")
+    @Cacheable(value = CacheConfig.IMAGE_CACHE, 
+               key = "'standings:' + #tournament.id + ':' + #page + ':' + (#tournament.updatedAt != null ? #tournament.updatedAt.toEpochSecond(java.time.ZoneOffset.UTC) : 0)")
     public byte[] getStandingsImage(Tournament tournament, List<TeamStanding> standings, int page) {
-        log.debug("Generating standings image for tournament {} page {}", tournament.getId(), page);
+        log.info("STANDINGS_IMAGE_GENERATE: tournamentId={}, page={}, updatedAt={}, teamsCount={}", 
+                tournament.getId(), page, tournament.getUpdatedAt(), standings.size());
+        
+        // Log standings snapshot for debugging
+        if (!standings.isEmpty()) {
+            log.debug("STANDINGS_SNAPSHOT: tournamentId={}, topTeam={}, topPoints={}", 
+                    tournament.getId(), 
+                    standings.get(0).getTeamName(), 
+                    standings.get(0).getPoints());
+        }
+        
         try {
             return standingsRenderer.render(tournament.getName(), standings, page);
         } catch (Exception e) {
@@ -40,11 +55,13 @@ public class ImageCacheService {
 
     /**
      * Get fixtures image from cache or generate new one.
-     * Cache key includes tournament ID, page, and the latest match update time.
+     * Cache key includes tournament ID, page, and the latest match update time (epoch millis).
      */
-    @Cacheable(value = CacheConfig.IMAGE_CACHE, key = "'fixtures:' + #tournament.id + ':' + #page + ':' + #latestUpdate?.toLocalDate()")
+    @Cacheable(value = CacheConfig.IMAGE_CACHE, 
+               key = "'fixtures:' + #tournament.id + ':' + #page + ':' + (#latestUpdate != null ? #latestUpdate.toEpochSecond(java.time.ZoneOffset.UTC) : 0)")
     public byte[] getFixturesImage(Tournament tournament, List<Match> matches, int page, LocalDateTime latestUpdate) {
-        log.debug("Generating fixtures image for tournament {} page {}", tournament.getId(), page);
+        log.info("FIXTURES_IMAGE_GENERATE: tournamentId={}, page={}, latestUpdate={}", 
+                tournament.getId(), page, latestUpdate);
         try {
             return fixturesRenderer.render(tournament.getName(), matches, page);
         } catch (Exception e) {
@@ -56,9 +73,11 @@ public class ImageCacheService {
     /**
      * Get fixtures image for a specific round.
      */
-    @Cacheable(value = CacheConfig.IMAGE_CACHE, key = "'fixtures_round:' + #tournament.id + ':' + #roundNumber + ':' + #page + ':' + #latestUpdate?.toLocalDate()")
+    @Cacheable(value = CacheConfig.IMAGE_CACHE, 
+               key = "'fixtures_round:' + #tournament.id + ':' + #roundNumber + ':' + #page + ':' + (#latestUpdate != null ? #latestUpdate.toEpochSecond(java.time.ZoneOffset.UTC) : 0)")
     public byte[] getFixturesRoundImage(Tournament tournament, int roundNumber, List<Match> roundMatches, int page, LocalDateTime latestUpdate) {
-        log.debug("Generating fixtures image for tournament {} round {} page {}", tournament.getId(), roundNumber, page);
+        log.info("FIXTURES_ROUND_IMAGE_GENERATE: tournamentId={}, round={}, page={}, latestUpdate={}", 
+                tournament.getId(), roundNumber, page, latestUpdate);
         try {
             return fixturesRenderer.renderRound(tournament.getName(), roundNumber, roundMatches, page);
         } catch (Exception e) {

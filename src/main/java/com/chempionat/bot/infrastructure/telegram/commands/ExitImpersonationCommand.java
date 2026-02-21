@@ -1,12 +1,12 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ActorContextService;
 import com.chempionat.bot.application.service.UserService;
 import com.chempionat.bot.domain.enums.Role;
 import com.chempionat.bot.domain.model.User;
 import com.chempionat.bot.infrastructure.telegram.KeyboardFactory;
 import com.chempionat.bot.infrastructure.telegram.TelegramBot;
 import com.chempionat.bot.infrastructure.telegram.TelegramCommand;
-import com.chempionat.bot.infrastructure.telegram.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,28 +20,28 @@ import java.util.Optional;
 public class ExitImpersonationCommand implements TelegramCommand {
 
     private final UserService userService;
+    private final ActorContextService actorContextService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
         Long chatId = extractChatId(update);
         Long userId = extractUserId(update);
 
-        // Verify user is admin
-        Optional<User> userOpt = userService.getUserByTelegramId(userId);
+        // Verify user is admin (use real user, not effective actor)
+        Optional<User> userOpt = actorContextService.getRealUser(userId);
         if (userOpt.isEmpty() || userOpt.get().getRole() != Role.ADMIN) {
             bot.sendMessage(chatId, "❌ Bu buyruq faqat adminlar uchun");
             return;
         }
 
-        UserContext context = UserContext.get(userId);
-        
-        if (!context.isImpersonating()) {
+        // Use ActorContextService to check and exit impersonation
+        if (!actorContextService.isImpersonating(userId)) {
             bot.sendMessage(chatId, "ℹ️ Siz hozirda hech kimni impersonate qilmayapsiz", 
                     KeyboardFactory.createAdminMenu());
             return;
         }
 
-        context.exitImpersonation();
+        actorContextService.exitImpersonation(userId);
         
         String message = "✅ Siz tashkilotchi profilidan chiqdingiz\n\n" +
                 "Endi o'zingiz (admin) sifatida ishlayapsiz.";

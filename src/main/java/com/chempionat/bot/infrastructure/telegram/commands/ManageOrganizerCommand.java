@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ActorContextService;
 import com.chempionat.bot.application.service.UserService;
 import com.chempionat.bot.domain.enums.Role;
 import com.chempionat.bot.domain.model.Tournament;
@@ -8,7 +9,6 @@ import com.chempionat.bot.domain.repository.TournamentRepository;
 import com.chempionat.bot.infrastructure.telegram.KeyboardFactory;
 import com.chempionat.bot.infrastructure.telegram.TelegramBot;
 import com.chempionat.bot.infrastructure.telegram.TelegramCommand;
-import com.chempionat.bot.infrastructure.telegram.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -27,6 +27,7 @@ public class ManageOrganizerCommand implements TelegramCommand {
 
     private final UserService userService;
     private final TournamentRepository tournamentRepository;
+    private final ActorContextService actorContextService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
@@ -150,14 +151,19 @@ public class ManageOrganizerCommand implements TelegramCommand {
             User organizer = userService.getUserById(organizerId)
                     .orElseThrow(() -> new IllegalArgumentException("Organizer not found"));
 
-            // Set impersonation in context
-            UserContext context = UserContext.get(adminId);
-            context.setImpersonatedOrganizer(organizerId);
+            // Use ActorContextService for impersonation (centralized identity resolution)
+            boolean success = actorContextService.startImpersonation(adminId, organizerId);
+            
+            if (!success) {
+                bot.editMessage(chatId, messageId, "❌ Impersonation ni boshlash mumkin emas");
+                return;
+            }
 
             String organizerName = organizer.getUsername() != null ? "@" + organizer.getUsername() : organizer.getFirstName();
             String message = "✅ Siz endi tashkilotchi sifatida kirgansiz!\n\n" +
                     "👤 Tashkilotchi: " + organizerName + "\n\n" +
-                    "Siz endi ushbu tashkilotchining barcha turnirlarini boshqarishingiz mumkin.\n\n" +
+                    "Siz endi ushbu tashkilotchining barcha turnirlarini boshqarishingiz mumkin.\n" +
+                    "Profil, turnirlar va boshqa buyruqlar tashkilotchi nomidan ishlaydi.\n\n" +
                     "Chiqish uchun pastdagi \"🚪 Chiqish\" tugmasini bosing.";
 
             // Delete old message and send new with organizer keyboard
@@ -166,7 +172,7 @@ public class ManageOrganizerCommand implements TelegramCommand {
             // Send message with organizer keyboard (includes "Chiqish" button)
             bot.sendMessage(chatId, message, KeyboardFactory.createOrganizerMenuWithExit());
 
-            log.info("Admin {} started impersonating organizer {}", adminId, organizerId);
+            log.info("Admin {} started impersonating organizer {} via ActorContextService", adminId, organizerId);
 
         } catch (Exception e) {
             log.error("Error starting impersonation", e);
@@ -203,8 +209,8 @@ public class ManageOrganizerCommand implements TelegramCommand {
         Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
         Long adminId = update.getCallbackQuery().getFrom().getId();
 
-        UserContext context = UserContext.get(adminId);
-        context.exitImpersonation();
+        // Use ActorContextService to exit impersonation
+        actorContextService.exitImpersonation(adminId);
 
         String message = "✅ Siz tashkilotchi profilidan chiqdingiz\n\n" +
                 "Endi o'zingiz (admin) sifatida ishlayapsiz.";
@@ -213,7 +219,7 @@ public class ManageOrganizerCommand implements TelegramCommand {
         bot.deleteMessage(chatId, messageId);
         bot.sendMessage(chatId, message, KeyboardFactory.createAdminMenu());
         
-        log.info("Admin {} exited impersonation", adminId);
+        log.info("Admin {} exited impersonation via ActorContextService", adminId);
     }
 
     private void viewOrganizerTournaments(Update update, TelegramBot bot) {
@@ -259,14 +265,13 @@ public class ManageOrganizerCommand implements TelegramCommand {
         Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
         Long adminId = update.getCallbackQuery().getFrom().getId();
 
-        UserContext context = UserContext.get(adminId);
-        
-        if (!context.isImpersonating()) {
+        // Use ActorContextService to check impersonation
+        if (!actorContextService.isImpersonating(adminId)) {
             bot.editMessage(chatId, messageId, "❌ Siz hech kimni impersonate qilmayapsiz");
             return;
         }
 
-        Long impersonatedUserId = context.getImpersonatedOrganizerId();
+        Long impersonatedUserId = actorContextService.getImpersonatedOrganizerId(adminId);
         
         try {
             User organizer = userService.getUserById(impersonatedUserId)

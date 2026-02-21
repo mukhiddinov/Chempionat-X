@@ -104,6 +104,9 @@ public class StandingsImageCommand implements TelegramCommand {
             List<Team> teams = tournamentService.getTournamentTeams(tournamentId);
             List<Match> matches = matchRepository.findByTournamentAndHomeScoreIsNotNull(tournament);
 
+            log.info("STANDINGS_REQUEST: tournamentId={}, updatedAt={}, teamsCount={}, matchesWithScores={}", 
+                    tournamentId, tournament.getUpdatedAt(), teams.size(), matches.size());
+
             if (teams.isEmpty()) {
                 bot.sendMessage(chatId, "📊 Bu turnirda hali ishtirokchilar yo'q.");
                 return;
@@ -122,7 +125,7 @@ public class StandingsImageCommand implements TelegramCommand {
             int totalPages = imageCacheService.getStandingsTotalPages(standings.size());
             page = Math.max(0, Math.min(page, totalPages - 1));
 
-            // Generate image
+            // Generate image (will be cached based on tournament.updatedAt)
             byte[] imageData = imageCacheService.getStandingsImage(tournament, standings, page);
 
             // Generate caption with top 3 teams

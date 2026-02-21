@@ -25,6 +25,15 @@ public class Match {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * Optimistic locking version field.
+     * Prevents concurrent modifications to the same match.
+     * JPA will throw OptimisticLockException if version mismatch.
+     */
+    @Version
+    @Column(name = "version")
+    private Long version;
+
     @ManyToOne
     @JoinColumn(name = "tournament_id", nullable = false)
     private Tournament tournament;
@@ -56,6 +65,32 @@ public class Match {
 
     @Column(name = "away_score")
     private Integer awayScore;
+
+    /**
+     * Home team penalty score (only used when match ends in draw during knockout).
+     * Null means no penalty shootout occurred.
+     */
+    @Column(name = "home_penalty_score")
+    private Integer homePenaltyScore;
+
+    /**
+     * Away team penalty score (only used when match ends in draw during knockout).
+     * Null means no penalty shootout occurred.
+     */
+    @Column(name = "away_penalty_score")
+    private Integer awayPenaltyScore;
+
+    /**
+     * Indicates if this match required penalty shootout to determine winner.
+     */
+    @Column(name = "decided_by_penalties")
+    private Boolean decidedByPenalties;
+
+    /**
+     * True if this is a third-place playoff match (loser semifinal match).
+     */
+    @Column(name = "is_third_place_match")
+    private Boolean isThirdPlaceMatch;
 
     @Column(name = "is_bye")
     private Boolean isBye;
@@ -103,6 +138,12 @@ public class Match {
         }
         if (isBye == null) {
             isBye = false;
+        }
+        if (decidedByPenalties == null) {
+            decidedByPenalties = false;
+        }
+        if (isThirdPlaceMatch == null) {
+            isThirdPlaceMatch = false;
         }
     }
 

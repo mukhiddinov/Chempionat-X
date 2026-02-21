@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ActorContextService;
 import com.chempionat.bot.application.service.TournamentService;
 import com.chempionat.bot.application.service.UserService;
 import com.chempionat.bot.domain.enums.TournamentType;
@@ -27,20 +28,21 @@ public class MyTournamentsCommand implements TelegramCommand {
     private final TournamentService tournamentService;
     private final UserService userService;
     private final TournamentRepository tournamentRepository;
+    private final ActorContextService actorContextService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
         Long chatId;
-        Long userId;
+        Long telegramId;
         int currentPage = 0;
 
         if (update.hasMessage()) {
             chatId = update.getMessage().getChatId();
-            userId = update.getMessage().getFrom().getId();
+            telegramId = update.getMessage().getFrom().getId();
         } else if (update.hasCallbackQuery()) {
             CallbackQuery callback = update.getCallbackQuery();
             chatId = callback.getMessage().getChatId();
-            userId = callback.getFrom().getId();
+            telegramId = callback.getFrom().getId();
             
             // Handle pagination
             if (callback.getData().startsWith("page:my_tournaments:")) {
@@ -53,24 +55,30 @@ public class MyTournamentsCommand implements TelegramCommand {
         }
 
         try {
-            Optional<User> userOpt = userService.getUserByTelegramId(userId);
-            if (userOpt.isEmpty()) {
+            // Use ActorContextService to get effective actor (respects impersonation)
+            Optional<User> effectiveUserOpt = actorContextService.getEffectiveActor(telegramId);
+            if (effectiveUserOpt.isEmpty()) {
                 bot.sendMessage(chatId, "Foydalanuvchi topilmadi. /start buyrug'ini yuboring.");
                 return;
             }
 
-            User user = userOpt.get();
-            List<Tournament> tournaments = tournamentRepository.findTournamentsByPlayerId(user.getId());
+            User effectiveUser = effectiveUserOpt.get();
+            List<Tournament> tournaments = tournamentRepository.findTournamentsByPlayerId(effectiveUser.getId());
 
             if (tournaments.isEmpty()) {
-                bot.sendMessage(chatId, 
-                        "📋 Siz hali turnirga qo'shilmagansiz.\n\n" +
-                        "Turnirga qo'shilish uchun 🎯 Turnirga qo'shilish tugmasini bosing.");
+                String emptyMessage = actorContextService.isImpersonating(telegramId) 
+                    ? "📋 Bu tashkilotchi hali turnirga qo'shilmagan.\n\nTurnirga qo'shilish uchun 🎯 Turnirga qo'shilish tugmasini bosing."
+                    : "📋 Siz hali turnirga qo'shilmagansiz.\n\nTurnirga qo'shilish uchun 🎯 Turnirga qo'shilish tugmasini bosing.";
+                bot.sendMessage(chatId, emptyMessage);
                 return;
             }
 
-            String message = String.format("🏆 Sizning turnirlaringiz (%d ta):\n\n" +
-                    "Tanlang:", tournaments.size());
+            // Build message with impersonation indicator
+            StringBuilder messageBuilder = new StringBuilder();
+            if (actorContextService.isImpersonating(telegramId)) {
+                messageBuilder.append("🎭 ").append(effectiveUser.getFullName()).append(" turnirlari\n\n");
+            }
+            messageBuilder.append(String.format("🏆 Sizning turnirlaringiz (%d ta):\n\nTanlang:", tournaments.size()));
 
             InlineKeyboardMarkup keyboard = PaginationHelper.createPaginatedKeyboard(
                     tournaments,
@@ -84,12 +92,14 @@ public class MyTournamentsCommand implements TelegramCommand {
             );
 
             if (update.hasCallbackQuery()) {
-                bot.editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), message, keyboard);
+                bot.editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), 
+                              messageBuilder.toString(), keyboard);
             } else {
-                bot.sendMessage(chatId, message, keyboard);
+                bot.sendMessage(chatId, messageBuilder.toString(), keyboard);
             }
 
-            log.info("User {} viewed their tournaments, page {}", userId, currentPage);
+            log.info("User {} viewed tournaments (effective actor: {}), page {}", 
+                    telegramId, effectiveUser.getTelegramId(), currentPage);
 
         } catch (Exception e) {
             log.error("Error showing user tournaments", e);

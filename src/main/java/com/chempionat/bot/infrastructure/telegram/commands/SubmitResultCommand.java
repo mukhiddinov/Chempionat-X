@@ -98,10 +98,15 @@ public class SubmitResultCommand implements TelegramCommand {
                 handlePhotoSubmission(bot, chatId, userId, context, matchId, update);
             } else if (step.equals("score") && update.getMessage().hasText()) {
                 handleScoreSubmission(bot, chatId, userId, context, matchId, update.getMessage().getText());
+            } else if (step.equals("penalty") && update.getMessage().hasText()) {
+                // Handle penalty submission for drawn knockout matches
+                handlePenaltySubmission(bot, chatId, userId, context, matchId, update.getMessage().getText());
             } else if (step.equals("photo")) {
                 bot.sendMessage(chatId, "❌ Iltimos rasm yuboring.");
             } else if (step.equals("score")) {
                 bot.sendMessage(chatId, "❌ Iltimos natijani X:Y formatda yuboring (masalan: 3:2).");
+            } else if (step.equals("penalty")) {
+                bot.sendMessage(chatId, "❌ Iltimos penalti natijasini X:Y formatda yuboring (masalan: 5:4).");
             }
         }
     }
@@ -315,6 +320,99 @@ public class SubmitResultCommand implements TelegramCommand {
         }
         
         try {
+            Optional<Match> matchOpt = matchRepository.findById(matchId);
+            
+            if (matchOpt.isEmpty()) {
+                bot.sendMessage(chatId, "❌ O'yin topilmadi.");
+                context.clearData();
+                return;
+            }
+            
+            Match match = matchOpt.get();
+            
+            // CHECK: If draw in knockout tournament, ask for penalty from USER
+            boolean isDraw = homeScore == awayScore;
+            boolean isKnockout = match.getTournament().getType() == com.chempionat.bot.domain.enums.TournamentType.PLAYOFF;
+            
+            if (isDraw && isKnockout) {
+                // Save scores temporarily and ask for penalty
+                context.setData("homeScore", homeScore);
+                context.setData("awayScore", awayScore);
+                context.setData("step", "penalty");
+                
+                bot.sendMessage(chatId, 
+                        "⚠️ Durrang! Playoff o'yinida penalti seriyasi kerak.\n\n" +
+                        "Iltimos penalti natijasini kiriting (X:Y formatda, masalan: 5:4):\n\n" +
+                        "❗ Penalti natijasi durrang bo'lishi mumkin emas.");
+                return;
+            }
+            
+            // No draw or not knockout - submit directly
+            submitResultWithOptionalPenalty(bot, chatId, userId, context, matchId, homeScore, awayScore, null, null);
+            
+        } catch (Exception e) {
+            log.error("Error in score submission", e);
+            bot.sendMessage(chatId, "❌ Xatolik yuz berdi. Qaytadan urinib ko'ring.");
+            context.clearData();
+        }
+    }
+    
+    /**
+     * Handle penalty score submission for drawn knockout matches.
+     * Called when user submits penalty after being prompted.
+     */
+    private void handlePenaltySubmission(TelegramBot bot, Long chatId, Long userId, 
+                                         UserContext context, Long matchId, String penaltyText) {
+        // Parse penalty score (format: "X:Y")
+        if (!penaltyText.trim().matches("^\\d{1,2}:\\d{1,2}$")) {
+            bot.sendMessage(chatId, "❌ Noto'g'ri format. Iltimos X:Y formatda kiriting (masalan: 5:4).\n\nQaytadan urinib ko'ring:");
+            return;
+        }
+        
+        String[] parts = penaltyText.trim().split(":");
+        int homePenalty;
+        int awayPenalty;
+        try {
+            homePenalty = Integer.parseInt(parts[0].trim());
+            awayPenalty = Integer.parseInt(parts[1].trim());
+            
+            if (homePenalty < 0 || awayPenalty < 0 || homePenalty > 20 || awayPenalty > 20) {
+                bot.sendMessage(chatId, "❌ Penalti natijasi 0-20 orasida bo'lishi kerak.\n\nQaytadan urinib ko'ring:");
+                return;
+            }
+            
+            // Penalty cannot be a draw
+            if (homePenalty == awayPenalty) {
+                bot.sendMessage(chatId, "❌ Penalti seriyasi durrang bilan tugashi mumkin emas!\n\nQaytadan urinib ko'ring:");
+                return;
+            }
+        } catch (NumberFormatException e) {
+            bot.sendMessage(chatId, "❌ Noto'g'ri raqam formati.\n\nQaytadan urinib ko'ring:");
+            return;
+        }
+        
+        // Get saved main scores from context
+        Integer homeScore = context.getDataAsInteger("homeScore");
+        Integer awayScore = context.getDataAsInteger("awayScore");
+        
+        if (homeScore == null || awayScore == null) {
+            bot.sendMessage(chatId, "❌ Sessiya tugadi. Qaytadan natija yuborishni boshlang.");
+            context.clearData();
+            return;
+        }
+        
+        // Submit with penalty
+        submitResultWithOptionalPenalty(bot, chatId, userId, context, matchId, homeScore, awayScore, homePenalty, awayPenalty);
+    }
+    
+    /**
+     * Submit match result with optional penalty scores.
+     */
+    private void submitResultWithOptionalPenalty(TelegramBot bot, Long chatId, Long userId, 
+                                                  UserContext context, Long matchId,
+                                                  int homeScore, int awayScore,
+                                                  Integer homePenalty, Integer awayPenalty) {
+        try {
             String photoFileId = context.getDataAsString("photoFileId");
             Optional<User> userOpt = userService.getUserByTelegramId(userId);
             Optional<Match> matchOpt = matchRepository.findById(matchId);
@@ -328,26 +426,39 @@ public class SubmitResultCommand implements TelegramCommand {
             User user = userOpt.get();
             Match match = matchOpt.get();
             
-            // Submit result
-            matchResultService.submitResult(match, user, homeScore, awayScore, photoFileId);
+            // Submit result with penalty if provided
+            matchResultService.submitResultWithPenalty(match, user, homeScore, awayScore, 
+                    photoFileId, homePenalty, awayPenalty);
             
-            String message = String.format(
-                    "✅ Natija muvaffaqiyatli yuborildi!\n\n" +
-                    "🏠 %s: %d\n" +
-                    "✈️ %s: %d\n\n" +
-                    "Natija admin tomonidan tasdiqlanishi kutilmoqda.",
-                    match.getHomeTeam().getName(),
-                    homeScore,
-                    match.getAwayTeam().getName(),
-                    awayScore
-            );
+            // Build confirmation message
+            String message;
+            if (homePenalty != null && awayPenalty != null) {
+                message = String.format(
+                        "✅ Natija muvaffaqiyatli yuborildi!\n\n" +
+                        "🏠 %s: %d\n" +
+                        "✈️ %s: %d\n" +
+                        "🎯 Penaltilar: %d:%d\n\n" +
+                        "Natija admin tomonidan tasdiqlanishi kutilmoqda.",
+                        match.getHomeTeam().getName(), homeScore,
+                        match.getAwayTeam().getName(), awayScore,
+                        homePenalty, awayPenalty
+                );
+            } else {
+                message = String.format(
+                        "✅ Natija muvaffaqiyatli yuborildi!\n\n" +
+                        "🏠 %s: %d\n" +
+                        "✈️ %s: %d\n\n" +
+                        "Natija admin tomonidan tasdiqlanishi kutilmoqda.",
+                        match.getHomeTeam().getName(), homeScore,
+                        match.getAwayTeam().getName(), awayScore
+                );
+            }
             
             bot.sendMessage(chatId, message);
             
-            log.info("Result submitted for match {} by user {}: {}:{}", 
-                     matchId, userId, homeScore, awayScore);
+            log.info("Result submitted for match {} by user {}: {}:{} pen:{}:{}", 
+                     matchId, userId, homeScore, awayScore, homePenalty, awayPenalty);
             
-            // Clear context only on successful submission
             context.clearData();
             
         } catch (IllegalStateException e) {

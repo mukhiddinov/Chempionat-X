@@ -1,6 +1,5 @@
 package com.chempionat.bot.infrastructure.telegram;
 
-import com.chempionat.bot.domain.enums.TournamentType;
 import lombok.Data;
 
 import java.util.HashMap;
@@ -8,7 +7,12 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Stores user conversation state for multi-step commands
+ * Stores user conversation state for multi-step commands.
+ * 
+ * NOTE: Impersonation logic has been moved to ActorContextService for centralized
+ * identity resolution. This class now only handles conversation state management.
+ * 
+ * @see com.chempionat.bot.application.service.ActorContextService
  */
 @Data
 public class UserContext {
@@ -17,9 +21,6 @@ public class UserContext {
     private Long userId;
     private String currentCommand;
     private Map<String, Object> data = new HashMap<>();
-    
-    // Admin impersonation support
-    private Long impersonatedOrganizerId;
     
     public static UserContext get(Long userId) {
         return contexts.computeIfAbsent(userId, id -> {
@@ -90,22 +91,5 @@ public class UserContext {
     public void clearData() {
         data.clear();
         currentCommand = null;
-    }
-    
-    // Impersonation methods
-    public void setImpersonatedOrganizer(Long organizerId) {
-        this.impersonatedOrganizerId = organizerId;
-    }
-    
-    public Long getImpersonatedOrganizerId() {
-        return impersonatedOrganizerId;
-    }
-    
-    public boolean isImpersonating() {
-        return impersonatedOrganizerId != null;
-    }
-    
-    public void exitImpersonation() {
-        this.impersonatedOrganizerId = null;
     }
 }

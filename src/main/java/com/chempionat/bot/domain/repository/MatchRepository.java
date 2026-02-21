@@ -5,7 +5,9 @@ import com.chempionat.bot.domain.enums.MatchStage;
 import com.chempionat.bot.domain.model.Match;
 import com.chempionat.bot.domain.model.Team;
 import com.chempionat.bot.domain.model.Tournament;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -23,6 +25,34 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
     List<Match> findByRound(Integer round);
     
     List<Match> findByHomeTeamOrAwayTeam(Team homeTeam, Team awayTeam);
+    
+    /**
+     * Find match by ID with pessimistic write lock.
+     * Use this when modifying match state to prevent concurrent modifications.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM Match m WHERE m.id = :id")
+    Optional<Match> findByIdWithLock(@Param("id") Long id);
+    
+    /**
+     * Find matches by tournament and round with pessimistic write lock.
+     * Use this when propagating winners to prevent race conditions.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM Match m WHERE m.tournament = :tournament AND m.round = :round")
+    List<Match> findByTournamentAndRoundWithLock(@Param("tournament") Tournament tournament, @Param("round") Integer round);
+    
+    /**
+     * Check if a next-round match already exists between two specific matches.
+     * Used to prevent duplicate next-round match creation.
+     */
+    @Query("SELECT COUNT(m) > 0 FROM Match m WHERE m.tournament = :tournament " +
+           "AND m.round = :round AND m.homeTeam = :homeTeam AND m.awayTeam = :awayTeam")
+    boolean existsByTournamentAndRoundAndTeams(
+            @Param("tournament") Tournament tournament,
+            @Param("round") Integer round,
+            @Param("homeTeam") Team homeTeam,
+            @Param("awayTeam") Team awayTeam);
     
     @Query("SELECT m FROM Match m WHERE (m.homeTeam = :team OR m.awayTeam = :team) " +
            "AND DATE(m.scheduledTime) = :date")

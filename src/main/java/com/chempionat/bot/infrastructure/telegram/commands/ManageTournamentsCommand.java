@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ActorContextService;
 import com.chempionat.bot.application.service.TournamentService;
 import com.chempionat.bot.application.service.UserService;
 import com.chempionat.bot.domain.enums.Role;
@@ -9,7 +10,6 @@ import com.chempionat.bot.domain.repository.TeamRepository;
 import com.chempionat.bot.domain.repository.TournamentRepository;
 import com.chempionat.bot.infrastructure.telegram.TelegramBot;
 import com.chempionat.bot.infrastructure.telegram.TelegramCommand;
-import com.chempionat.bot.infrastructure.telegram.UserContext;
 import com.chempionat.bot.infrastructure.telegram.util.PaginationHelper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,21 +32,27 @@ public class ManageTournamentsCommand implements TelegramCommand {
     private final TeamRepository teamRepository;
     private final UserService userService;
     private final TournamentService tournamentService;
+    private final ActorContextService actorContextService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
         Long chatId = extractChatId(update);
-        Long userId = extractUserId(update);
+        Long telegramId = extractUserId(update);
 
-        // Check if user is organizer or admin
-        Optional<User> userOpt = userService.getUserByTelegramId(userId);
-        if (userOpt.isEmpty()) {
+        // Get effective actor (respects impersonation)
+        Optional<User> effectiveUserOpt = actorContextService.getEffectiveActor(telegramId);
+        if (effectiveUserOpt.isEmpty()) {
             bot.sendMessage(chatId, "❌ Foydalanuvchi topilmadi");
             return;
         }
 
-        User user = userOpt.get();
-        if (user.getRole() != Role.ORGANIZER && user.getRole() != Role.ADMIN && user.getRole() != Role.MODERATOR) {
+        User effectiveUser = effectiveUserOpt.get();
+        
+        // Check role - use effective user's role for authorization
+        // BUT admin can always manage if impersonating
+        boolean isAdmin = actorContextService.isImpersonating(telegramId);
+        if (!isAdmin && effectiveUser.getRole() != Role.ORGANIZER && 
+            effectiveUser.getRole() != Role.ADMIN && effectiveUser.getRole() != Role.MODERATOR) {
             bot.sendMessage(chatId, "❌ Faqat tashkilotchilar turnirlarni boshqarishi mumkin");
             return;
         }
@@ -60,13 +66,15 @@ public class ManageTournamentsCommand implements TelegramCommand {
             } else if (callbackData.startsWith("share_tournament:")) {
                 handleShareTournament(update, bot);
             } else if (callbackData.startsWith("page:manage_tournaments:")) {
-                handlePagination(update, bot, user);
+                handlePagination(update, bot, effectiveUser);
             } else if (callbackData.equals("back_to_manage_list")) {
                 // Show tournaments list again
                 Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
                 
-                List<Tournament> tournaments = tournamentRepository.findByCreatedBy(user);
-                String message = "\uD83C\uDFC6 Mening turnirlarim\n\nBoshqarish uchun turnirni tanlang:";
+                List<Tournament> tournaments = tournamentRepository.findByCreatedBy(effectiveUser);
+                
+                // Add impersonation indicator
+                String message = buildTournamentsListMessage(telegramId);
                 
                 InlineKeyboardMarkup keyboard = PaginationHelper.createPaginatedKeyboard(
                         tournaments,
@@ -80,21 +88,34 @@ public class ManageTournamentsCommand implements TelegramCommand {
                 bot.editMessage(chatId, messageId, message, keyboard);
             }
         } else {
-            showTournamentsList(bot, chatId, user, 0);
+            showTournamentsList(bot, chatId, telegramId, effectiveUser, 0);
         }
     }
 
-    private void showTournamentsList(TelegramBot bot, Long chatId, User user, int page) {
-        List<Tournament> tournaments = tournamentRepository.findByCreatedBy(user);
+    private String buildTournamentsListMessage(Long telegramId) {
+        StringBuilder message = new StringBuilder();
+        if (actorContextService.isImpersonating(telegramId)) {
+            Optional<User> organizerOpt = actorContextService.getImpersonatedOrganizer(telegramId);
+            if (organizerOpt.isPresent()) {
+                message.append("🎭 ").append(organizerOpt.get().getFullName()).append(" turnirlari\n\n");
+            }
+        }
+        message.append("🏆 Mening turnirlarim\n\nBoshqarish uchun turnirni tanlang:");
+        return message.toString();
+    }
+
+    private void showTournamentsList(TelegramBot bot, Long chatId, Long telegramId, User effectiveUser, int page) {
+        List<Tournament> tournaments = tournamentRepository.findByCreatedBy(effectiveUser);
 
         if (tournaments.isEmpty()) {
-            bot.sendMessage(chatId, "📭 Sizda hali turnirlar yo'q.\n\n" +
-                    "Yangi turnir yaratish uchun: /createtournament");
+            String emptyMessage = actorContextService.isImpersonating(telegramId) 
+                ? "📭 Bu tashkilotchida hali turnirlar yo'q.\n\nYangi turnir yaratish uchun: /createtournament"
+                : "📭 Sizda hali turnirlar yo'q.\n\nYangi turnir yaratish uchun: /createtournament";
+            bot.sendMessage(chatId, emptyMessage);
             return;
         }
 
-        String message = "\uD83C\uDFC6 Mening turnirlarim\n\n" +
-                "Boshqarish uchun turnirni tanlang:";
+        String message = buildTournamentsListMessage(telegramId);
 
         InlineKeyboardMarkup keyboard = PaginationHelper.createPaginatedKeyboard(
                 tournaments,
@@ -290,6 +311,7 @@ public class ManageTournamentsCommand implements TelegramCommand {
     private void handlePagination(Update update, TelegramBot bot, User user) {
         Long chatId = update.getCallbackQuery().getMessage().getChatId();
         Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
+        Long telegramId = update.getCallbackQuery().getFrom().getId();
         String callbackData = update.getCallbackQuery().getData();
 
         try {
@@ -297,7 +319,7 @@ public class ManageTournamentsCommand implements TelegramCommand {
             int page = Integer.parseInt(parts[2]);
 
             List<Tournament> tournaments = tournamentRepository.findByCreatedBy(user);
-            String message = "\uD83C\uDFC6 Mening turnirlarim\n\nBoshqarish uchun turnirni tanlang:";
+            String message = buildTournamentsListMessage(telegramId);
 
             InlineKeyboardMarkup keyboard = PaginationHelper.createPaginatedKeyboard(
                     tournaments,

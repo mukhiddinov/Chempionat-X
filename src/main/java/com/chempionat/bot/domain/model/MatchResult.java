@@ -35,6 +35,20 @@ public class MatchResult {
     @Column(name = "away_score", nullable = false)
     private Integer awayScore;
 
+    /**
+     * Home team penalty score (only for knockout draws).
+     * Null if match didn't go to penalties.
+     */
+    @Column(name = "home_penalty_score")
+    private Integer homePenaltyScore;
+
+    /**
+     * Away team penalty score (only for knockout draws).
+     * Null if match didn't go to penalties.
+     */
+    @Column(name = "away_penalty_score")
+    private Integer awayPenaltyScore;
+
     @Column(name = "screenshot_url")
     private String screenshotUrl;
 

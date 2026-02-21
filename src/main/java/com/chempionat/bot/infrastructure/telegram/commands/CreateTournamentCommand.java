@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ActorContextService;
 import com.chempionat.bot.application.service.TournamentService;
 import com.chempionat.bot.application.service.UserService;
 import com.chempionat.bot.domain.enums.Role;
@@ -24,6 +25,7 @@ public class CreateTournamentCommand implements TelegramCommand {
 
     private final TournamentService tournamentService;
     private final UserService userService;
+    private final ActorContextService actorContextService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
@@ -62,11 +64,22 @@ public class CreateTournamentCommand implements TelegramCommand {
     }
 
     private void startTournamentCreation(TelegramBot bot, Long chatId, Long userId, UserContext context) {
-        // Check if user is admin or organizer
-        Optional<User> userOpt = userService.getUserByTelegramId(userId);
-        if (userOpt.isEmpty() || (userOpt.get().getRole() != Role.ADMIN && 
-                                   userOpt.get().getRole() != Role.MODERATOR && 
-                                   userOpt.get().getRole() != Role.ORGANIZER)) {
+        // Use effective actor for role check - allows admin to create as impersonated organizer
+        Optional<User> effectiveUserOpt = actorContextService.getEffectiveActor(userId);
+        if (effectiveUserOpt.isEmpty()) {
+            bot.sendMessage(chatId, "❌ Foydalanuvchi topilmadi. /start buyrug'ini yuboring.");
+            return;
+        }
+        
+        User effectiveUser = effectiveUserOpt.get();
+        
+        // Check if effective user can create tournaments (or admin is impersonating)
+        boolean canCreate = effectiveUser.getRole() == Role.ADMIN || 
+                           effectiveUser.getRole() == Role.MODERATOR || 
+                           effectiveUser.getRole() == Role.ORGANIZER ||
+                           actorContextService.isImpersonating(userId);
+        
+        if (!canCreate) {
             bot.sendMessage(chatId, "❌ Faqat adminlar va tashkilotchilar turnir yaratishi mumkin.\n\n" +
                     "Tashkilotchi bo'lish uchun: /requestorganizer");
             return;
@@ -75,7 +88,13 @@ public class CreateTournamentCommand implements TelegramCommand {
         context.setCurrentCommand(getCommandName());
         context.setData("step", "name");
         
-        bot.sendMessage(chatId, "🏆 Yangi turnir yaratish\n\nTurnir nomini kiriting:");
+        // Show indicator if creating as impersonated organizer
+        if (actorContextService.isImpersonating(userId)) {
+            bot.sendMessage(chatId, "🎭 Siz " + effectiveUser.getFullName() + " nomidan turnir yaratmoqdasiz\n\n" +
+                    "🏆 Yangi turnir yaratish\n\nTurnir nomini kiriting:");
+        } else {
+            bot.sendMessage(chatId, "🏆 Yangi turnir yaratish\n\nTurnir nomini kiriting:");
+        }
     }
 
     private void handleConversation(TelegramBot bot, Long chatId, Long userId, 
@@ -174,14 +193,16 @@ public class CreateTournamentCommand implements TelegramCommand {
     private void createTournamentWithSettings(TelegramBot bot, Long chatId, Long userId,
                                               Integer messageId, UserContext context) {
         try {
-            Optional<User> userOpt = userService.getUserByTelegramId(userId);
-            if (userOpt.isEmpty()) {
+            // Use effective actor - this is the key fix!
+            // When admin is impersonating, tournament is created for the organizer
+            Optional<User> effectiveUserOpt = actorContextService.getEffectiveActor(userId);
+            if (effectiveUserOpt.isEmpty()) {
                 bot.editMessage(chatId, messageId, "Foydalanuvchi topilmadi.");
                 context.clearData();
                 return;
             }
 
-            User user = userOpt.get();
+            User effectiveUser = effectiveUserOpt.get();
             String name = context.getDataAsString("name");
             String description = context.getDataAsString("description");
             TournamentType type = TournamentType.valueOf(context.getDataAsString("type"));
@@ -189,8 +210,8 @@ public class CreateTournamentCommand implements TelegramCommand {
             Integer numberOfRounds = context.getDataAsInteger("number_of_rounds");
             Boolean autoStart = context.getDataAsBoolean("auto_start");
 
-            // Create tournament
-            Tournament tournament = tournamentService.createTournament(name, description, type, user);
+            // Create tournament with effective user as creator
+            Tournament tournament = tournamentService.createTournament(name, description, type, effectiveUser);
             
             // Update with additional settings
             if (maxParticipants != null) {
@@ -205,11 +226,12 @@ public class CreateTournamentCommand implements TelegramCommand {
             
             tournament = tournamentService.updateTournament(tournament);
 
-            String message = buildSuccessMessage(tournament, description);
+            String message = buildSuccessMessage(tournament, description, userId);
             bot.editMessage(chatId, messageId, message);
             
-            log.info("Tournament created: id={}, name={}, type={}, maxParticipants={}, rounds={}, autoStart={}, creator={}", 
-                     tournament.getId(), name, type, maxParticipants, numberOfRounds, autoStart, userId);
+            log.info("Tournament created: id={}, name={}, type={}, maxParticipants={}, rounds={}, autoStart={}, creator={} (effectiveActor for telegramId={})", 
+                     tournament.getId(), name, type, maxParticipants, numberOfRounds, autoStart, 
+                     effectiveUser.getTelegramId(), userId);
 
         } catch (Exception e) {
             log.error("Error creating tournament", e);
@@ -219,8 +241,17 @@ public class CreateTournamentCommand implements TelegramCommand {
         }
     }
     
-    private String buildSuccessMessage(Tournament tournament, String description) {
+    private String buildSuccessMessage(Tournament tournament, String description, Long telegramUserId) {
         StringBuilder sb = new StringBuilder();
+        
+        // Add impersonation indicator
+        if (actorContextService.isImpersonating(telegramUserId)) {
+            Optional<User> organizerOpt = actorContextService.getImpersonatedOrganizer(telegramUserId);
+            if (organizerOpt.isPresent()) {
+                sb.append("🎭 Turnir ").append(organizerOpt.get().getFullName()).append(" nomidan yaratildi\n\n");
+            }
+        }
+        
         sb.append("✅ Turnir muvaffaqiyatli yaratildi!\n\n");
         sb.append("🏆 Nomi: ").append(tournament.getName()).append("\n");
         sb.append("📊 Format: ").append(getTypeText(tournament.getType().name())).append("\n");

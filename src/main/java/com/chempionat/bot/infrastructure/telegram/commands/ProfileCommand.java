@@ -1,5 +1,6 @@
 package com.chempionat.bot.infrastructure.telegram.commands;
 
+import com.chempionat.bot.application.service.ActorContextService;
 import com.chempionat.bot.application.service.UserService;
 import com.chempionat.bot.domain.model.User;
 import com.chempionat.bot.infrastructure.telegram.TelegramBot;
@@ -17,6 +18,7 @@ import java.util.Optional;
 public class ProfileCommand implements TelegramCommand {
 
     private final UserService userService;
+    private final ActorContextService actorContextService;
 
     @Override
     public void execute(Update update, TelegramBot bot) {
@@ -24,11 +26,21 @@ public class ProfileCommand implements TelegramCommand {
         Long telegramId = update.getMessage().getFrom().getId();
 
         try {
-            Optional<User> userOpt = userService.getUserByTelegramId(telegramId);
+            // Use ActorContextService to get effective actor (respects impersonation)
+            Optional<User> effectiveUserOpt = actorContextService.getEffectiveActor(telegramId);
 
-            if (userOpt.isPresent()) {
-                User user = userOpt.get();
-                String profileMessage = String.format(
+            if (effectiveUserOpt.isPresent()) {
+                User user = effectiveUserOpt.get();
+                
+                // Build profile message
+                StringBuilder profileMessage = new StringBuilder();
+                
+                // Add impersonation indicator if admin is impersonating
+                if (actorContextService.isImpersonating(telegramId)) {
+                    profileMessage.append("🎭 Tashkilotchi profilini ko'rmoqdasiz\n\n");
+                }
+                
+                profileMessage.append(String.format(
                         "👤 Your Profile\n\n" +
                         "Name: %s %s\n" +
                         "Username: @%s\n" +
@@ -39,13 +51,14 @@ public class ProfileCommand implements TelegramCommand {
                         user.getUsername() != null ? user.getUsername() : "N/A",
                         user.getRole(),
                         user.getCreatedAt().toLocalDate()
-                );
-                bot.sendMessage(chatId, profileMessage);
+                ));
+                
+                bot.sendMessage(chatId, profileMessage.toString());
             } else {
                 bot.sendMessage(chatId, "Profile not found. Please use /start first.");
             }
             
-            log.debug("Profile viewed by user: {}", telegramId);
+            log.debug("Profile viewed by user: {} (effective actor)", telegramId);
         } catch (Exception e) {
             log.error("Error executing profile command", e);
             bot.sendMessage(chatId, "Sorry, an error occurred. Please try again later.");

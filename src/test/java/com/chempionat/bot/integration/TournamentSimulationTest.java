@@ -385,4 +385,149 @@ class TournamentSimulationTest {
         
         return standings;
     }
+
+    /**
+     * Test scenario for sequential approval of multiple pending matches in a knockout tournament.
+     * Verifies:
+     * - No race conditions occur
+     * - No duplicate next-round match generation
+     * - Bracket state remains consistent
+     * - Idempotent approvals work correctly
+     */
+    @Test
+    void testSequentialApprovalOfMultiplePendingMatches() {
+        System.out.println("\n=== Testing Sequential Approval of Multiple Pending Matches ===\n");
+
+        // Step 1: Create Playoff tournament with 4 teams
+        System.out.println("Step 1: Creating Playoff tournament with 4 teams...");
+        Tournament tournament = tournamentService.createTournament(
+                "Sequential Approval Test Cup",
+                "Test for sequential approval safety",
+                TournamentType.PLAYOFF,
+                admin
+        );
+        assertNotNull(tournament);
+        System.out.println("✓ Playoff tournament created: " + tournament.getName());
+
+        // Step 2: 4 Players join
+        System.out.println("\nStep 2: Players joining...");
+        Team team1 = tournamentService.joinTournament(tournament, player1, "Sequential Team 1");
+        Team team2 = tournamentService.joinTournament(tournament, player2, "Sequential Team 2");
+        Team team3 = tournamentService.joinTournament(tournament, player3, "Sequential Team 3");
+        Team team4 = tournamentService.joinTournament(tournament, player4, "Sequential Team 4");
+        System.out.println("✓ 4 teams joined");
+
+        // Step 3: Start tournament
+        System.out.println("\nStep 3: Starting tournament...");
+        tournamentService.startTournament(tournament.getId());
+        System.out.println("✓ Tournament started");
+
+        // Step 4: Get semi-final matches
+        System.out.println("\nStep 4: Verifying semi-final matches...");
+        List<Match> semiMatches = matchRepository.findByTournament(tournament);
+        assertEquals(2, semiMatches.size(), "4 teams should generate 2 semi-final matches");
+        
+        Match semi1 = semiMatches.get(0);
+        Match semi2 = semiMatches.get(1);
+        System.out.println("✓ Semi-finals: ");
+        System.out.println("  Match " + semi1.getId() + ": " + semi1.getHomeTeam().getName() + " vs " + semi1.getAwayTeam().getName());
+        System.out.println("  Match " + semi2.getId() + ": " + semi2.getHomeTeam().getName() + " vs " + semi2.getAwayTeam().getName());
+
+        // Step 5: Submit results for both matches (both go to PENDING_APPROVAL)
+        System.out.println("\nStep 5: Submitting results for both semi-finals...");
+        MatchResult result1 = matchResultService.submitResult(
+                semi1, semi1.getHomeTeam().getUser(), 2, 1, "screenshot1.jpg");
+        MatchResult result2 = matchResultService.submitResult(
+                semi2, semi2.getHomeTeam().getUser(), 3, 0, "screenshot2.jpg");
+        
+        // Refresh matches
+        semi1 = matchRepository.findById(semi1.getId()).orElseThrow();
+        semi2 = matchRepository.findById(semi2.getId()).orElseThrow();
+        
+        assertEquals(MatchLifecycleState.PENDING_APPROVAL, semi1.getState());
+        assertEquals(MatchLifecycleState.PENDING_APPROVAL, semi2.getState());
+        System.out.println("✓ Both matches are in PENDING_APPROVAL state");
+
+        // Step 6: Approve first match
+        System.out.println("\nStep 6: Approving first semi-final...");
+        matchResultService.approveResult(result1.getId(), admin);
+        
+        semi1 = matchRepository.findById(semi1.getId()).orElseThrow();
+        assertEquals(MatchLifecycleState.APPROVED, semi1.getState());
+        System.out.println("✓ Match " + semi1.getId() + " approved. State: " + semi1.getState());
+        System.out.println("  Score: " + semi1.getHomeScore() + "-" + semi1.getAwayScore());
+        System.out.println("  Winner: " + semi1.getHomeTeam().getName()); // 2-1 means home won
+
+        // Step 7: Verify no final match created yet (waiting for second semi)
+        System.out.println("\nStep 7: Verifying bracket state...");
+        List<Match> allMatches = matchRepository.findByTournament(tournament);
+        int matchCountAfterFirst = allMatches.size();
+        System.out.println("  Matches after first approval: " + matchCountAfterFirst);
+        
+        // Final should only be created when BOTH semis are done
+        // After first semi approval, we should still have 2 matches (no final yet)
+        assertEquals(2, matchCountAfterFirst, "Final should not be created until both semis complete");
+        System.out.println("✓ No premature final match created");
+
+        // Step 8: Approve second match
+        System.out.println("\nStep 8: Approving second semi-final...");
+        matchResultService.approveResult(result2.getId(), admin);
+        
+        semi2 = matchRepository.findById(semi2.getId()).orElseThrow();
+        assertEquals(MatchLifecycleState.APPROVED, semi2.getState());
+        System.out.println("✓ Match " + semi2.getId() + " approved. State: " + semi2.getState());
+        System.out.println("  Score: " + semi2.getHomeScore() + "-" + semi2.getAwayScore());
+        System.out.println("  Winner: " + semi2.getHomeTeam().getName()); // 3-0 means home won
+
+        // Step 9: Verify final match was created
+        System.out.println("\nStep 9: Verifying final match creation...");
+        allMatches = matchRepository.findByTournament(tournament);
+        int matchCountAfterSecond = allMatches.size();
+        System.out.println("  Matches after second approval: " + matchCountAfterSecond);
+        
+        // After both semifinals complete: 2 semis + 1 final + 1 third-place = 4 matches
+        assertTrue(matchCountAfterSecond >= 3 && matchCountAfterSecond <= 4, 
+                "Should have 3-4 matches (semis + final + optional third-place)");
+        
+        // Find the final match
+        Match finalMatch = allMatches.stream()
+                .filter(m -> m.getRound() != null && m.getRound() == 2)
+                .findFirst()
+                .orElse(null);
+        
+        assertNotNull(finalMatch, "Final match should exist");
+        assertNotNull(finalMatch.getHomeTeam(), "Final should have home team (semi1 winner)");
+        assertNotNull(finalMatch.getAwayTeam(), "Final should have away team (semi2 winner)");
+        System.out.println("✓ Final match created successfully:");
+        System.out.println("  Match " + finalMatch.getId() + ": " + 
+                finalMatch.getHomeTeam().getName() + " vs " + finalMatch.getAwayTeam().getName());
+
+        // Step 10: Test idempotency - approve same results again
+        System.out.println("\nStep 10: Testing idempotency (double approval)...");
+        // This should NOT throw exception, just return gracefully
+        matchResultService.approveResult(result1.getId(), admin);
+        matchResultService.approveResult(result2.getId(), admin);
+        System.out.println("✓ Double approvals handled gracefully (idempotent)");
+
+        // Step 11: Verify no duplicate final matches (exclude third-place match)
+        System.out.println("\nStep 11: Verifying no duplicate final matches...");
+        allMatches = matchRepository.findByTournament(tournament);
+        long finalCount = allMatches.stream()
+                .filter(m -> m.getRound() != null && m.getRound() == 2 && !Boolean.TRUE.equals(m.getIsThirdPlaceMatch()))
+                .count();
+        assertEquals(1, finalCount, "Should have exactly ONE final match");
+        System.out.println("✓ No duplicate final matches created");
+
+        // Step 12: Complete the final
+        System.out.println("\nStep 12: Completing the final...");
+        MatchResult finalResult = matchResultService.submitResult(
+                finalMatch, finalMatch.getHomeTeam().getUser(), 1, 0, "final_screenshot.jpg");
+        matchResultService.approveResult(finalResult.getId(), admin);
+        
+        finalMatch = matchRepository.findById(finalMatch.getId()).orElseThrow();
+        assertEquals(MatchLifecycleState.APPROVED, finalMatch.getState());
+        System.out.println("✓ Final completed. Champion: " + finalMatch.getHomeTeam().getName());
+
+        System.out.println("\n=== Sequential Approval Test Completed Successfully ===\n");
+    }
 }
